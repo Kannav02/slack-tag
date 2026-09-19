@@ -34,6 +34,8 @@ OpenCode is the first supported backend. A small common agent interface and back
 17. As the owner, I want to use OpenCode's supported authentication and available provider access, so that the bridge does not introduce its own inference billing layer.
 18. As a maintainer, I want backend-specific behavior behind an adapter, so that adding another compatible agent does not require rewriting the Slack integration.
 19. As the owner, I want visible failures when the agent cannot complete a request, so that a failed run is not mistaken for success.
+20. As the owner, I want idle project servers to stop automatically, so that inactive projects do not retain running agent processes and their memory usage.
+21. As the owner, I want a new message to restart a stopped project server and resume the same session, so that resource savings do not discard conversation context.
 
 ## Implementation Decisions
 
@@ -52,6 +54,17 @@ OpenCode is the first supported backend. A small common agent interface and back
 - Restart recovery means the conversation can resume. It does not promise that an in-flight command continues or is automatically replayed.
 - Each new session starts in its configured project folder and uses project instructions supported by the backend. Folder access does not mean every file is eagerly loaded into the model context.
 - No automatic ingestion of channel history, other thread histories, or cross-project knowledge. Files written by another session remain visible because the project folder is shared.
+
+### Project server lifecycle
+
+- Keep one agent server per active project environment, serving that project's thread sessions. A saved thread does not require a permanently running process of its own.
+- The bridge remains available to receive Slack messages while project servers are stopped.
+- After a configurable idle period, gracefully stop the project server and its managed execution environment, preserving project files, attachments, backend session data, and bridge mappings. The idle duration is not yet selected.
+- Stopping means releasing the environment's running processes and their memory, not freezing a process that still holds RAM. Persistent storage and the bridge still consume resources.
+- Stop only when every session in the project is inactive, with no running tools or commands, pending inputs, or outstanding approval requests. Leaving a Slack thread or closing Slack does not itself stop work or establish idleness. If activity cannot be established safely, do not stop automatically.
+- On an authorized message to a stopped project, start its environment, wait for backend readiness, then deliver the input to the mapped session. A new thread creates a new session instead. Cold-start latency is an accepted V1 tradeoff.
+- Coordinate startup and shutdown with incoming messages so a transition does not lose or duplicate input or start duplicate project servers. This lifecycle coordination is required even though concurrent-edit coordination is out of scope.
+- A failed startup produces a visible failure, not a silent replacement session or a false success. Recovery restores conversation context; it does not resume or replay interrupted commands.
 
 ### Agent interface
 
@@ -90,6 +103,8 @@ Slack and inference services may be simulated at their external boundaries for r
 | Channel routing | A request uses the configured project's files and instructions; an unmapped channel cannot launch arbitrary project work. |
 | Thread sessions | Replies retain the current thread's conversation; another thread begins a separate session without the first thread's chat history. |
 | Persistence | After restarting the bridge and backend with retained storage, a thread resumes its existing conversation rather than starting over. |
+| Idle shutdown | After the configured idle period, an inactive project's managed processes stop while project files and conversation data remain. Active work, pending input, and pending approvals prevent shutdown. |
+| Cold-start recovery | A message to a stopped project starts one environment and continues the mapped conversation with prior context; a new thread creates a separate session. Inputs arriving during lifecycle transitions are not lost or duplicated, and startup failures are reported visibly. |
 | Streaming | Agent output appears progressively in the originating thread and concludes with the correct final response or visible failure. |
 | Attachments | Supported files/images arrive as usable inputs in the correct session; unsupported inputs fail clearly and cannot escape project-scoped storage. |
 | Automatic actions | A representative routine permitted action completes without an approval prompt. |
@@ -105,7 +120,7 @@ Keep tests feature-oriented. Combine related acceptance scenarios where useful; 
 - Cross-thread memory, automatic channel-history ingestion, shared wikis, and cross-project knowledge retrieval.
 - Additional agent adapters beyond OpenCode.
 - A web dashboard, scheduled jobs, or a new agent/tool execution engine.
-- User-facing stop/status controls and advanced run management.
+- User-facing stop/status controls and advanced run management beyond the automatic idle shutdown and on-demand startup described above.
 - Concurrent-edit coordination, worktrees per thread, merging, or locking product features. Threads share project files; V1 does not promise conflict-free simultaneous edits.
 - Generated-file delivery back to Slack.
 - Comprehensive support for every attachment format or every provider subscription.
