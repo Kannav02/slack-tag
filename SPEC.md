@@ -73,7 +73,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 - Implement only the OpenCode adapter in V1. Future adapters translate their backend's RPC or equivalent structured protocol into this interface.
 - Streaming support alone does not establish compatibility. Sessions, attachments, authentication, and permission behavior must be verified separately. Unsupported capabilities must be explicit rather than silently bypassed.
 - The bridge uses the backend's supported login/provider configuration. It does not promise that every subscription can be reused with every agent.
-- Language, runtime, database, exact OpenCode version/protocol, and Slack transport have not yet been selected. Verify the required OpenCode capabilities before choosing the stack; do not present unverified choices as agreed requirements.
+- Selected stack: TypeScript on Bun, Slack Bolt with Socket Mode, SQLite for bridge mappings, and rootless Podman for project isolation. Target OpenCode V2 through its network client, not the embedded SDK. OpenCode server/client 2.0.3 is the current verification baseline, not yet an integration-tested compatibility claim. See [OpenCode interface reference](opencode-interface.md) for the version-specific contract and pending behavior checks.
 
 ### Permissions and isolation
 
