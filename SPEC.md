@@ -1,6 +1,6 @@
 # Slack Bridge: V1
 
-Status: requirements agreed; implementation not started.
+Status: requirements agreed; Bun/TypeScript dependency setup added; feature implementation not started.
 Tracking: local specification only. No external issue tracker or publishing.
 
 ## Problem Statement
@@ -130,5 +130,5 @@ Keep tests feature-oriented. Combine related acceptance scenarios where useful; 
 
 - This document follows the to-spec structure, with local documentation replacing external issue publication at the owner's request.
 - Requirements are sufficient to start a minimal prototype. Remaining technical choices should be resolved through focused compatibility checks, not another product interview.
-- The project starts empty. Previously explored VPS installations and disposable bridge work are context, not an existing implementation in this repository.
+- The project has documentation and dependency setup, not a working bridge. Previously explored VPS installations and disposable bridge work are context, not an existing implementation in this repository.
 - Successful behavior tests establish the tested contract, not proof against every destructive command or sandbox escape.

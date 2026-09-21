@@ -114,9 +114,9 @@ Use integration tests through the bridge's public entry point, with real OpenCod
 5. A restricted fixture command has no side effect until approve-once; reject and unauthorized decisions leave it unexecuted.
 6. Event disconnection and recovery do not fabricate completion, lose the final answer, or rerun the prompt.
 7. Idle shutdown waits for pending work and approvals; an incoming message during a lifecycle transition is neither lost nor duplicated.
-8. Bolt message/action handling and Socket Mode reconnect work under Bun. Bolt declares Node engine requirements; its Bun runtime compatibility is not yet verified.
+8. Bolt message/action handling and Socket Mode reconnect work under Bun. A local simulated-Slack integration check passed with Bun 1.4.0 and Bolt 5.1.0; real Slack and Linux VPS verification remain pending. Bolt declares Node engine requirements rather than official Bun support.
 
-No package installation, Bun execution of the client, live Slack test, or VPS integration test has been completed for this reference. Exact native event names, admission retry semantics, and the supported attachment matrix remain open verification items.
+Dependency installation and a no-network client import check are part of project setup. No live Slack test or V2 server integration test has been completed for this reference. Exact native event names, admission retry semantics, and the supported attachment matrix remain open verification items.
 
 ## Sources and version discipline
 
