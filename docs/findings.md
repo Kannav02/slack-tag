@@ -25,8 +25,8 @@ Reproduce with `spike/v2/run.sh` (fake model, no key) and `spike/v2/real.sh` (re
 | Hard denies | Global `experimental.policies` deny rules fail without prompting (`Blocked by configuration policy`). Project config cannot lift them. |
 | Busy session | `delivery: "queue"` runs a message after the current run; the default, `"steer"`, redirects the running agent. |
 | Real model | `opencode/big-pickle` (free, no key) completed a prompt with one shell approval and a streamed reply. |
-| Go routing | A dummy key on `opencode-go/kimi-k2.7-code` reaches Go and fails with a typed `provider.auth` 401. This run had no `OPENCODE_API_KEY` (`opencode-go` connections empty), so `kimi-k2.7-code`, `glm-5.2`, and `minimax-m3` all failed immediately with `provider.no-route` (`Model unavailable`): no approval prompt, no file, no reply. The real key is still untested. |
-| Go images | Not run. No Go model was connected, so no prompt with an image attachment was sent. |
+| Go routing | With `OPENCODE_API_KEY` set, `opencode-go/kimi-k2.7-code` completed `MODEL=opencode-go/kimi-k2.7-code ./real.sh`: one shell approval for `touch real-model.txt`, the file created only after `once`, reply `DONE`, `session.execution.succeeded`. `glm-5.2` and `minimax-m3` were not retried. Earlier, a dummy key reached Go and failed with `provider.auth` 401, and a run with no key failed all three immediately with `provider.no-route`. |
+| Go images | `opencode-go/kimi-k2.7-code` advertises `capabilities.input` of `text`, `image`, and `video`. A `session.prompt` with a solid blue PNG attached as `files: [{ uri: "file:///…/sample.png" }]` (neutral filename) finished `session.execution.succeeded` and replied `Blue`, with no tool call. `minimax-m3` also advertises image input; `glm-5.2` advertises `text` only. Other connected Go models that advertise `image` include `kimi-k3`, `glm-5.3-flash`, `qwen3.8-flash`, and `deepseek-v4.1-flash`. |
 | Go headers | OpenCode sends its own `user-agent` and `x-opencode-session` on model requests, as Go requires. A proxy in front must forward them. |
 
 ## OpenCode Go constraints
