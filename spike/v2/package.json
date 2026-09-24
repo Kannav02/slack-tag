@@ -1,0 +1,12 @@
+{
+  "name": "opencode-v2-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spike": "./run.sh"
+  },
+  "dependencies": {
+    "@opencode/cli": "2.0.15",
+    "@opencode/client": "2.0.15"
+  }
+}
