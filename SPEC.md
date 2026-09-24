@@ -60,7 +60,10 @@ OpenCode is the first supported backend. A small common agent interface and back
 - Implement only the OpenCode adapter in V1. Future adapters translate their backend's RPC or equivalent structured protocol into this interface.
 - Streaming support alone does not establish compatibility. Sessions, attachments, authentication, and permission behavior must be verified separately. Unsupported capabilities must be explicit rather than silently bypassed.
 - The bridge uses the backend's supported login/provider configuration. It does not promise that every subscription can be reused with every agent.
-- Language, runtime, database, exact OpenCode version/protocol, and Slack transport have not yet been selected. Verify the required OpenCode capabilities before choosing the stack; do not present unverified choices as agreed requirements.
+- V1 targets OpenCode v2 through `@opencode/client`, pinned with the server to 2.0.15. Required capabilities were verified in `spike/v2`; see `docs/findings.md`.
+- Inference uses the owner's OpenCode Go subscription via OpenCode's `opencode-go` provider. Anthropic subscriptions are not used.
+- The Slack bot is addressed as `@OpenCode` and runs on the owner's VPS.
+- Language, bridge runtime, database, and Slack transport have not yet been selected.
 
 ### Permissions and isolation
 
@@ -116,4 +119,5 @@ Keep tests feature-oriented. Combine related acceptance scenarios where useful; 
 - This document follows the to-spec structure, with local documentation replacing external issue publication at the owner's request.
 - Requirements are sufficient to start a minimal prototype. Remaining technical choices should be resolved through focused compatibility checks, not another product interview.
 - The project starts empty. Previously explored VPS installations and disposable bridge work are context, not an existing implementation in this repository.
+- `spike/v2` is a compatibility spike, not the bridge implementation.
 - Successful behavior tests establish the tested contract, not proof against every destructive command or sandbox escape.
