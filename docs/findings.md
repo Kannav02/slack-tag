@@ -25,7 +25,8 @@ Reproduce with `spike/v2/run.sh` (fake model, no key) and `spike/v2/real.sh` (re
 | Hard denies | Global `experimental.policies` deny rules fail without prompting (`Blocked by configuration policy`). Project config cannot lift them. |
 | Busy session | `delivery: "queue"` runs a message after the current run; the default, `"steer"`, redirects the running agent. |
 | Real model | `opencode/big-pickle` (free, no key) completed a prompt with one shell approval and a streamed reply. |
-| Go routing | `opencode-go/kimi-k2.7-code` with a dummy key reached Go and failed with a typed `provider.auth` 401 error. Not yet run with the real key. |
+| Go routing | A dummy key on `opencode-go/kimi-k2.7-code` reaches Go and fails with a typed `provider.auth` 401. This run had no `OPENCODE_API_KEY` (`opencode-go` connections empty), so `kimi-k2.7-code`, `glm-5.2`, and `minimax-m3` all failed immediately with `provider.no-route` (`Model unavailable`): no approval prompt, no file, no reply. The real key is still untested. |
+| Go images | Not run. No Go model was connected, so no prompt with an image attachment was sent. |
 | Go headers | OpenCode sends its own `user-agent` and `x-opencode-session` on model requests, as Go requires. A proxy in front must forward them. |
 
 ## OpenCode Go constraints
