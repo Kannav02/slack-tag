@@ -23,7 +23,7 @@ node "$here/mock-model.mjs" > "$work/mock.log" 2>&1 &
 pids+=($!)
 
 start_server() {
-  (cd "$PROJECT_DIR" && env HOME="$work/home" XDG_CONFIG_HOME="$work/home/.config" \
+  (cd "$PROJECT_DIR" && exec env HOME="$work/home" XDG_CONFIG_HOME="$work/home/.config" \
     XDG_DATA_HOME="$work/home/.local/share" XDG_STATE_HOME="$work/home/.local/state" \
     XDG_CACHE_HOME="$work/home/.cache" OPENCODE_SERVER_PASSWORD="$OC_PASSWORD" \
     "$here/node_modules/.bin/opencode" serve --hostname 127.0.0.1 --port 4096 > "$work/server.log" 2>&1) &
