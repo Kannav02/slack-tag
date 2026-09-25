@@ -66,13 +66,12 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     clearTimeout(run.timer)
     run.timer = undefined
     const part = (i: number) => run.text.slice(i * LIMIT, (i + 1) * LIMIT)
+    if (run.parts.length) await slack.update(run.channelId, run.parts.at(-1)!, part(run.parts.length - 1))
     while (run.parts.length < Math.ceil(run.text.length / LIMIT)) {
       const ts = await slack.post(run.channelId, run.threadTs, part(run.parts.length))
       db.addReply(ts, run.sessionId, run.channelId)
       run.parts.push(ts)
     }
-    const last = run.parts.length - 1
-    await slack.update(run.channelId, run.parts[last], part(last))
     run.lastEdit = Date.now()
   }
 
