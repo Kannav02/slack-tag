@@ -1,62 +1,27 @@
 export const PLUGIN_VERSION = "1"
 export const POLICY_VERSION = 1
 
-export type Effect = "allow" | "ask" | "deny"
+export type Decision = { effect: "allow" | "ask" | "deny"; message?: string }
 
-export type Decision = {
-  effect: Effect
-  message?: string
-}
-
-const SHELL_ALLOW = new Set(["ls", "cat", "pwd"])
-const GIT_ALLOW = new Set(["status", "diff", "log"])
-
-const READ_ACTIONS = new Set(["read", "glob", "grep", "list", "search"])
-const EDIT_ACTIONS = new Set(["edit", "write", "patch"])
-const WEB_ACTIONS = new Set(["webfetch", "websearch"])
-
-const PROTECTED = [
-  /(^|\/)\.opencode(\/|$)/,
-  /(^|\/)opencode\.jsonc?$/,
-  /(^|\/)\.git\/hooks(\/|$)/,
-  /(^|\/)\.git\/config$/,
-]
-
-function words(command: string): string[] {
-  return command.trim().split(/\s+/)
-}
-
-function protectedPath(resource: string): boolean {
-  return PROTECTED.some((pattern) => pattern.test(resource))
-}
+const DENY: Decision = { effect: "deny", message: "Blocked by the safety plugin" }
+const SHELL_ALLOW = new Set(["ls", "cat", "pwd", "git status", "git diff", "git log"])
+const READ = new Set(["read", "glob", "grep", "list", "search"])
+const EDIT = new Set(["edit", "write", "patch"])
+const PROTECTED = /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git\/hooks(\/|$)|\.git\/config$)/
+const SECRET = /OPENCODE_API_KEY|OPENCODE_SERVER_PASSWORD|SLACK_/
 
 export function decide(action: string, resources: readonly string[]): Decision {
   if (action === "shell") {
-    const command = resources[0] ?? ""
-    const [first, second] = words(command)
-    if (first === "sudo") return { effect: "deny", message: "Blocked by the safety plugin" }
-    if (first && SHELL_ALLOW.has(first)) return { effect: "allow" }
-    if (first === "git" && second && GIT_ALLOW.has(second)) return { effect: "allow" }
-    return { effect: "ask" }
+    const [first, second] = (resources[0] ?? "").trim().split(/\s+/)
+    if (first === "sudo") return DENY
+    return SHELL_ALLOW.has(first) || SHELL_ALLOW.has(`${first} ${second}`) ? { effect: "allow" } : { effect: "ask" }
   }
-
-  if (EDIT_ACTIONS.has(action) && resources.some(protectedPath)) {
-    return { effect: "deny", message: "Blocked by the safety plugin" }
-  }
-  if (READ_ACTIONS.has(action) || EDIT_ACTIONS.has(action)) return { effect: "allow" }
-  if (WEB_ACTIONS.has(action)) return { effect: "ask" }
-  return { effect: "ask" }
-}
-
-const SECRET_ENV = new Set(["OPENCODE_API_KEY", "OPENCODE_SERVER_PASSWORD"])
-
-function leaksSecret(value: string | undefined): boolean {
-  if (!value) return false
-  return value.includes("OPENCODE_API_KEY") || value.includes("OPENCODE_SERVER_PASSWORD") || value.includes("SLACK_")
+  if (EDIT.has(action) && resources.some((path) => PROTECTED.test(path))) return DENY
+  return READ.has(action) || EDIT.has(action) ? { effect: "allow" } : { effect: "ask" }
 }
 
 export function stripSecrets(env: Record<string, string | undefined>): void {
   for (const key of Object.keys(env)) {
-    if (SECRET_ENV.has(key) || key.startsWith("SLACK_") || leaksSecret(env[key])) delete env[key]
+    if (SECRET.test(key) || SECRET.test(env[key] ?? "")) delete env[key]
   }
 }
