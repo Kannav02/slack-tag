@@ -1,74 +1,46 @@
-# One fixed service per mapped channel. Start a channel with:
-#   docker compose -f deploy/compose.yaml up -d alpha
+# One fixed service per mapped channel. Run deploy/prepare-project.sh on each project first.
 # SLACK_TAG_RUNTIME=runsc when gVisor is installed. Otherwise the default is runc.
+x-channel: &channel
+  image: slack-tag-opencode:2.0.15
+  runtime: ${SLACK_TAG_RUNTIME:-runc}
+  restart: unless-stopped
+  user: "1000:1000"
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  mem_limit: 2g
+  pids_limit: 512
+  env_file: ${OPENCODE_ENV_FILE:-/etc/slack-tag/opencode.env}
+  tmpfs: [/tmp]
+
 services:
   alpha:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    image: slack-tag-opencode:2.0.15
-    runtime: ${SLACK_TAG_RUNTIME:-runc}
-    user: "1000:1000"
-    init: true
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    mem_limit: 2g
-    pids_limit: 512
-    ports:
-      - "127.0.0.1:${ALPHA_PORT:-4101}:4096"
-    environment:
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?set OPENCODE_SERVER_PASSWORD}
-      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
-      HOME: /data
-      XDG_CONFIG_HOME: /opt/slack-tag/xdg
-      XDG_DATA_HOME: /data/share
-      XDG_STATE_HOME: /data/state
-      XDG_CACHE_HOME: /data/cache
+    <<: *channel
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    ports: ["127.0.0.1:${ALPHA_PORT:-4101}:4096"]
     volumes:
       - ${ALPHA_PROJECT:?set ALPHA_PROJECT}:/project
       - alpha-data:/data
-      - type: tmpfs
-        target: /tmp
       - ${ALPHA_PROJECT}/.opencode:/project/.opencode:ro
       - ${ALPHA_PROJECT}/opencode.json:/project/opencode.json:ro
       - ${ALPHA_PROJECT}/opencode.jsonc:/project/opencode.jsonc:ro
       - ${ALPHA_PROJECT}/.git/hooks:/project/.git/hooks:ro
       - ${ALPHA_PROJECT}/.git/config:/project/.git/config:ro
-    working_dir: /project
 
+  # Copy this service for each further channel, with its own port, project, and data volume.
   beta:
-    profiles: ["extra"]
-    image: slack-tag-opencode:2.0.15
-    runtime: ${SLACK_TAG_RUNTIME:-runc}
-    user: "1000:1000"
-    init: true
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    mem_limit: 2g
-    pids_limit: 512
-    ports:
-      - "127.0.0.1:${BETA_PORT:-4102}:4096"
-    environment:
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?set OPENCODE_SERVER_PASSWORD}
-      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
-      HOME: /data
-      XDG_CONFIG_HOME: /opt/slack-tag/xdg
-      XDG_DATA_HOME: /data/share
-      XDG_STATE_HOME: /data/state
-      XDG_CACHE_HOME: /data/cache
+    <<: *channel
+    profiles: [extra]
+    ports: ["127.0.0.1:${BETA_PORT:-4102}:4096"]
     volumes:
-      - ${BETA_PROJECT:-/tmp/slack-tag-unused-beta}:/project
+      - ${BETA_PROJECT:-/nonexistent}:/project
       - beta-data:/data
-      - type: tmpfs
-        target: /tmp
-      - ${BETA_PROJECT:-/tmp/slack-tag-unused-beta}/.opencode:/project/.opencode:ro
-      - ${BETA_PROJECT:-/tmp/slack-tag-unused-beta}/opencode.json:/project/opencode.json:ro
-      - ${BETA_PROJECT:-/tmp/slack-tag-unused-beta}/opencode.jsonc:/project/opencode.jsonc:ro
-      - ${BETA_PROJECT:-/tmp/slack-tag-unused-beta}/.git/hooks:/project/.git/hooks:ro
-      - ${BETA_PROJECT:-/tmp/slack-tag-unused-beta}/.git/config:/project/.git/config:ro
-    working_dir: /project
+      - ${BETA_PROJECT:-/nonexistent}/.opencode:/project/.opencode:ro
+      - ${BETA_PROJECT:-/nonexistent}/opencode.json:/project/opencode.json:ro
+      - ${BETA_PROJECT:-/nonexistent}/opencode.jsonc:/project/opencode.jsonc:ro
+      - ${BETA_PROJECT:-/nonexistent}/.git/hooks:/project/.git/hooks:ro
+      - ${BETA_PROJECT:-/nonexistent}/.git/config:/project/.git/config:ro
 
 volumes:
   alpha-data:
