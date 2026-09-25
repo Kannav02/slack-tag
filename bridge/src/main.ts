@@ -1,74 +1,87 @@
 import { dirname, join } from "node:path"
-import { App } from "@slack/bolt"
+import bolt from "@slack/bolt"
+import { connect, pluginReady, subscribe } from "./agent.ts"
+import type { SlackFile } from "./attachments.ts"
 import { loadConfig } from "./config.ts"
 import { openDb } from "./db.ts"
-import { connect, pluginReady, subscribe } from "./agent.ts"
-import { slackApi } from "./slack.ts"
-import { createRouter, type ChannelRuntime } from "./turn.ts"
+import { createRouter, type Runtime, type SlackApi } from "./turn.ts"
 
-const configPath = process.env.SLACK_TAG_CONFIG
-const password = process.env.OPENCODE_SERVER_PASSWORD
-const botToken = process.env.SLACK_BOT_TOKEN
-const appToken = process.env.SLACK_APP_TOKEN
+function required(name: string): string {
+  const value = process.env[name]
+  if (!value) throw new Error(`${name} is required`)
+  return value
+}
 
-if (!configPath) throw new Error("SLACK_TAG_CONFIG is required")
-if (!password) throw new Error("OPENCODE_SERVER_PASSWORD is required")
-if (!botToken) throw new Error("SLACK_BOT_TOKEN is required")
-if (!appToken) throw new Error("SLACK_APP_TOKEN is required")
+const configPath = required("SLACK_TAG_CONFIG")
+const password = required("OPENCODE_SERVER_PASSWORD")
+const botToken = required("SLACK_BOT_TOKEN")
+const appToken = required("SLACK_APP_TOKEN")
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : "unknown error")
+const redact = (text: string) => text.replace(/xox[a-z]-[A-Za-z0-9-]+|xapp-[A-Za-z0-9-]+/g, "[redacted]")
 
 const config = loadConfig(configPath)
 const db = openDb(join(dirname(configPath), "slack-tag.sqlite"))
-const channels = new Map<string, ChannelRuntime>()
-
+const channels = new Map<string, Runtime>()
 for (const [id, channel] of Object.entries(config.channels)) {
   const client = connect(channel.opencodeUrl, password)
   const available = await pluginReady(client)
   channels.set(id, { channel, client, available })
-  console.log(available ? `channel ${id} (${channel.name}) ready` : `channel ${id} (${channel.name}) unavailable`)
+  console.log(`channel ${id} (${channel.name}) ${available ? "ready" : "unavailable"}`)
 }
 
-const app = new App({ token: botToken, appToken, socketMode: true })
-const slack = slackApi(app.client)
+const app = new bolt.App({ token: botToken, appToken, socketMode: true })
+const slack: SlackApi = {
+  async post(channel, thread_ts, text, blocks) {
+    const posted = await app.client.chat.postMessage({ channel, thread_ts, text: redact(text), blocks: blocks as never })
+    if (!posted.ts) throw new Error("Slack did not return a message ts")
+    return posted.ts
+  },
+  async update(channel, ts, text, blocks) {
+    await app.client.chat.update({ channel, ts, text: redact(text), blocks: blocks as never })
+  },
+  async ephemeral(channel, user, thread_ts, text) {
+    await app.client.chat.postEphemeral({ channel, user, thread_ts, text })
+  },
+  download: (url) => fetch(url, { headers: { authorization: `Bearer ${botToken}` } }),
+}
 const router = createRouter(config, db, slack, channels)
+const botId = (await app.client.auth.test()).user_id
+const mention = `<@${botId}>`
 
-for (const runtime of channels.values()) {
-  subscribe(runtime.client, (event) => {
-    void router.onEvent(event)
-  })
-}
-
-for (const reply of db.streamingReplies()) {
-  await slack.update(reply.channel_id, reply.message_ts, "The bridge restarted during the run.")
-  db.setReplyState(reply.message_ts, "failed")
-}
-
-app.event("app_mention", async ({ event, body }) => {
-  await router.handle({
-    teamId: body.team_id ?? "",
-    channelId: event.channel,
-    userId: event.user ?? "",
-    text: event.text ?? "",
-    ts: event.ts,
-    threadTs: event.thread_ts,
-    mention: true,
-  })
-})
+for (const { client } of channels.values()) subscribe(client, router.onEvent)
+await router.recover()
+setInterval(() => void router.expire(), 15_000)
 
 app.event("message", async ({ event, body }) => {
-  if (event.subtype || event.bot_id) return
-  const text = "text" in event ? event.text ?? "" : ""
-  if (text.includes("<@")) return
-  if (!("thread_ts" in event) || !event.thread_ts) return
-  await router.handle({
-    teamId: body.team_id ?? "",
-    channelId: event.channel,
-    userId: "user" in event ? event.user ?? "" : "",
-    text,
-    ts: event.ts,
-    threadTs: event.thread_ts,
-    mention: false,
-  })
+  const m = event as { subtype?: string; bot_id?: string; user?: string; text?: string; ts: string; thread_ts?: string; channel: string; files?: SlackFile[] }
+  if ((m.subtype && m.subtype !== "file_share") || m.bot_id || !m.user) return
+  const text = m.text ?? ""
+  await router
+    .handle({
+      teamId: body.team_id ?? "",
+      channelId: m.channel,
+      userId: m.user,
+      text: text.replaceAll(mention, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"),
+      ts: m.ts,
+      threadTs: m.thread_ts,
+      mention: text.includes(mention),
+      files: m.files ?? [],
+    })
+    .catch(async (error: unknown) => {
+      console.error("message failed:", redact(messageOf(error)))
+      await slack.post(m.channel, m.thread_ts ?? m.ts, `The request failed: ${messageOf(error)}`).catch(() => undefined)
+    })
 })
+
+for (const [actionId, decision] of [["approve", "once"], ["reject", "reject"]] as const) {
+  app.action(actionId, async ({ ack, body, action }) => {
+    await ack()
+    const b = body as { user: { id: string }; channel?: { id: string }; message?: { ts: string; thread_ts?: string } }
+    await router
+      .click(b.user.id, decision, (action as { value: string }).value, b.channel?.id ?? "", b.message?.thread_ts ?? b.message?.ts)
+      .catch((error: unknown) => console.error("click failed:", redact(messageOf(error))))
+  })
+}
 
 await app.start()
 console.log("bridge connected")

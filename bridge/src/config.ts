@@ -1,29 +1,17 @@
 import { readFileSync } from "node:fs"
 
-export type Channel = {
-  name: string
-  projectDir: string
-  serverDir: string
-  opencodeUrl: string
-  model: string
-}
-
-export type Config = {
-  ownerUserId: string
-  approvalTimeoutMinutes: number
-  channels: Record<string, Channel>
-}
-
-const channelFields = ["name", "projectDir", "serverDir", "opencodeUrl", "model"] as const
+export type Channel = { name: string; projectDir: string; serverDir: string; opencodeUrl: string; model: string }
+export type Config = { ownerUserId: string; approvalTimeoutMinutes: number; channels: Record<string, Channel> }
 
 export function loadConfig(path: string): Config {
-  const raw = JSON.parse(readFileSync(path, "utf8")) as Config
-  if (!raw.ownerUserId) throw new Error("config is missing ownerUserId")
-  if (!raw.channels || typeof raw.channels !== "object") throw new Error("config is missing channels")
-  for (const [id, channel] of Object.entries(raw.channels)) {
-    for (const field of channelFields) {
-      if (!channel?.[field]) throw new Error(`channel ${id} is missing ${field}`)
+  const config = JSON.parse(readFileSync(path, "utf8")) as Config
+  if (!config.ownerUserId || !config.channels) throw new Error("config needs ownerUserId and channels")
+  config.approvalTimeoutMinutes ??= 30
+  for (const [id, channel] of Object.entries(config.channels)) {
+    channel.serverDir ??= channel.projectDir
+    for (const field of ["name", "projectDir", "opencodeUrl", "model"] as const) {
+      if (!channel[field]) throw new Error(`channel ${id} is missing ${field}`)
     }
   }
-  return raw
+  return config
 }

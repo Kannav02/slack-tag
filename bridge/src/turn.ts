@@ -1,11 +1,17 @@
+import { createSession, decide, inputsOf, pending, pluginReady, prompt, type AgentEvent, type Client, type Permission } from "./agent.ts"
+import { refusal, store, type SlackFile } from "./attachments.ts"
 import type { Channel, Config } from "./config.ts"
-import type { Db } from "./db.ts"
-import type { Client } from "./agent.ts"
-import { createSession, prompt } from "./agent.ts"
-import type { SlackApi } from "./slack.ts"
+import type { Approval, Db } from "./db.ts"
 
 const LIMIT = 3500
 const EDIT_MS = 1000
+
+export type SlackApi = {
+  post(channel: string, threadTs: string, text: string, blocks?: object[]): Promise<string>
+  update(channel: string, ts: string, text: string, blocks?: object[]): Promise<void>
+  ephemeral(channel: string, user: string, threadTs: string | undefined, text: string): Promise<void>
+  download(url: string): Promise<Response>
+}
 
 export type Incoming = {
   teamId: string
@@ -15,191 +21,206 @@ export type Incoming = {
   ts: string
   threadTs?: string
   mention: boolean
+  files: SlackFile[]
 }
 
-type Live = {
-  sessionId: string
-  teamId: string
-  channelId: string
-  threadTs: string
-  text: string
-  parts: string[]
-  lastEdit: number
-  timer?: ReturnType<typeof setTimeout>
-  busy: boolean
-  pendingNext: boolean
-  retryAt?: number
-  failure?: string
+export type Runtime = { channel: Channel; client: Client; available: boolean }
+
+type Run = { sessionId: string; channelId: string; threadTs: string; text: string; parts: string[]; lastEdit: number; timer?: NodeJS.Timeout; retryAt?: number }
+
+const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+function blocks(summary: string, value?: string) {
+  const section = { type: "section", text: { type: "mrkdwn", text: summary } }
+  if (!value) return [section]
+  const button = (action_id: string, text: string, style: string) => ({ type: "button", action_id, style, value, text: { type: "plain_text", text } })
+  return [section, { type: "actions", elements: [button("approve", "Approve", "primary"), button("reject", "Reject", "danger")] }]
 }
 
-export type ChannelRuntime = {
-  channel: Channel
-  client: Client
-  available: boolean
-}
-
-export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, ChannelRuntime>) {
-  const live = new Map<string, Live>()
-
-  function sessionOf(event: { data?: Record<string, unknown> }) {
-    const id = event.data?.sessionID
-    return typeof id === "string" ? id : undefined
+export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>) {
+  const runs = new Map<string, Run>()
+  let chain = Promise.resolve()
+  const serial = (task: () => Promise<unknown>) => {
+    chain = chain.then(async () => void (await task())).catch((error: unknown) => console.error("bridge task failed:", error instanceof Error ? error.message : "error"))
+    return chain
   }
 
-  async function flush(run: Live, force: boolean) {
+  function runOf(sessionId: string): Run | undefined {
+    if (runs.has(sessionId)) return runs.get(sessionId)
+    const thread = db.threadBySession(sessionId)
+    if (!thread) return
+    const run = { sessionId, channelId: thread.channel_id, threadTs: thread.thread_ts, text: "", parts: [], lastEdit: 0 }
+    runs.set(sessionId, run)
+    return run
+  }
+
+  async function flush(run: Run, force = false) {
     if (!run.text) return
-    const now = Date.now()
-    if (!force && now - run.lastEdit < EDIT_MS) {
-      if (!run.timer) {
-        run.timer = setTimeout(() => {
-          run.timer = undefined
-          void flush(run, true)
-        }, EDIT_MS)
-      }
+    if (!force && Date.now() - run.lastEdit < EDIT_MS) {
+      run.timer ??= setTimeout(() => {
+        run.timer = undefined
+        void serial(() => flush(run, true))
+      }, EDIT_MS)
       return
     }
-    if (run.timer) {
-      clearTimeout(run.timer)
-      run.timer = undefined
-    }
-    const chunkCount = Math.max(1, Math.ceil(run.text.length / LIMIT))
-    while (run.parts.length < chunkCount) {
-      const index = run.parts.length
-      const slice = run.text.slice(index * LIMIT, (index + 1) * LIMIT)
-      const ts = await slack.post(run.channelId, run.threadTs, slice)
-      db.insertReply(ts, run.sessionId, run.channelId)
+    clearTimeout(run.timer)
+    run.timer = undefined
+    const part = (i: number) => run.text.slice(i * LIMIT, (i + 1) * LIMIT)
+    while (run.parts.length < Math.ceil(run.text.length / LIMIT)) {
+      const ts = await slack.post(run.channelId, run.threadTs, part(run.parts.length))
+      db.addReply(ts, run.sessionId, run.channelId)
       run.parts.push(ts)
     }
     const last = run.parts.length - 1
-    const slice = run.text.slice(last * LIMIT, (last + 1) * LIMIT)
-    await slack.update(run.channelId, run.parts[last], slice)
+    await slack.update(run.channelId, run.parts[last], part(last))
     run.lastEdit = Date.now()
   }
 
-  async function finish(run: Live, state: "done" | "failed", extra?: string) {
-    if (run.timer) clearTimeout(run.timer)
-    if (extra) run.text = run.text ? `${run.text}\n\n${extra}` : extra
-    if (!run.text) run.text = state === "done" ? "The run finished." : "The run failed."
+  async function finish(run: Run, state: "done" | "failed", note?: string) {
+    if (note) run.text = run.text ? `${run.text}\n\n${note}` : note
+    run.text ||= "The run finished."
     await flush(run, true)
-    for (const ts of run.parts) db.setReplyState(ts, state)
-    run.parts = []
-    run.text = ""
-    run.lastEdit = 0
+    for (const ts of run.parts) db.setReply(ts, state)
+    Object.assign(run, { text: "", parts: [], lastEdit: 0 })
   }
 
-  let chain = Promise.resolve()
+  async function ask(request: Permission) {
+    const known = db.approval(request.id)
+    if (known?.message_ts) return
+    const thread = db.threadBySession(request.sessionID)
+    if (!thread) return
+    const summary = `*Approval needed:* ${escape(request.action)}\n\`\`\`${escape(request.resources.join("\n"))}\`\`\``
+    if (!known) {
+      db.addApproval({ request_id: request.id, session_id: request.sessionID, channel_id: thread.channel_id, thread_ts: thread.thread_ts, summary, asked_at: Date.now() })
+    }
+    const value = JSON.stringify({ sessionId: request.sessionID, requestId: request.id })
+    db.setApprovalMessage(request.id, await slack.post(thread.channel_id, thread.thread_ts, summary, blocks(summary, value)))
+  }
 
-  async function apply(event: { type: string; data?: Record<string, unknown> }) {
-    const sessionId = sessionOf(event)
-    if (!sessionId) return
-    const run = live.get(sessionId)
+  async function settle(row: Approval, note: string) {
+    const text = `${row.summary}\n*${note}*`
+    if (row.message_ts) await slack.update(row.channel_id, row.message_ts, text, blocks(text))
+  }
+
+  async function sweep(client: Client, sessionId: string, note: string) {
+    const live = new Set((await pending(client, sessionId)).map((request) => request.id))
+    for (const row of db.pendingApprovals(sessionId)) {
+      if (!live.has(row.request_id) && db.claim(row.request_id, "rejected")) await settle(row, note)
+    }
+  }
+
+  async function apply(event: AgentEvent) {
+    const data = event.data ?? {}
+    if (event.type === "permission.asked") return ask(data as Permission)
+    const run = typeof data.sessionID === "string" ? runOf(data.sessionID) : undefined
     if (!run) return
-
-    if (event.type === "session.retry.scheduled" && typeof event.data?.at === "number") {
-      run.retryAt = event.data.at
-      return
-    }
-    if (event.type === "session.inbox.delivered" && run.pendingNext && (run.text || run.parts.length)) {
-      await finish(run, "done")
-      run.pendingNext = false
-      run.busy = true
-      return
-    }
-    if (event.type === "session.text.delta" && typeof event.data?.delta === "string") {
-      run.busy = true
-      run.text += event.data.delta
-      await flush(run, false)
-      return
-    }
-    if (event.type === "session.execution.succeeded") {
-      await finish(run, "done")
-      run.busy = false
-      run.pendingNext = false
-      return
-    }
-    if (event.type === "session.execution.failed" || event.type === "session.execution.interrupted") {
-      const error = event.data?.error as { message?: string; status?: number } | undefined
-      const interrupted = event.type === "session.execution.interrupted"
-      let message = interrupted ? "The run was interrupted." : `The run failed: ${error?.message ?? "the agent could not complete the request."}`
-      if (error?.status === 429) {
-        const when = run.retryAt ? new Date(run.retryAt).toISOString() : "later"
-        message = `The provider rate limit was hit. Retry after ${when}.`
-      }
-      await finish(run, "failed", message)
-      run.busy = false
-      run.pendingNext = false
+    switch (event.type) {
+      case "session.retry.scheduled":
+        run.retryAt = data.at
+        return
+      case "session.inbox.delivered":
+        if (run.text) await finish(run, "done")
+        return
+      case "session.text.delta":
+        run.text += data.delta ?? ""
+        return flush(run)
+      case "session.execution.succeeded":
+        return finish(run, "done")
+      case "session.execution.failed":
+        return finish(
+          run,
+          "failed",
+          data.error?.status === 429
+            ? `The provider rate limit was hit. Retry after ${run.retryAt ? new Date(run.retryAt).toISOString() : "later"}.`
+            : `The run failed: ${data.error?.message ?? "the agent could not complete the request."}`,
+        )
+      case "session.execution.interrupted":
+        return finish(run, "failed", "The run was interrupted.")
     }
   }
 
-  function onEvent(event: { type: string; data?: Record<string, unknown> }) {
-    chain = chain.then(() => apply(event)).catch((error: unknown) => {
-      console.error("event handling failed:", error instanceof Error ? error.message : "error")
+  async function handle(m: Incoming) {
+    const threadTs = m.threadTs ?? m.ts
+    const thread = m.threadTs ? db.thread(m.teamId, m.channelId, m.threadTs) : undefined
+    if (!m.mention && !thread) return
+    const say = (text: string) => slack.post(m.channelId, threadTs, text)
+    if (m.userId !== config.ownerUserId) return slack.ephemeral(m.channelId, m.userId, threadTs, "Only the owner can talk to OpenCode here.")
+    const runtime = channels.get(m.channelId)
+    if (!runtime) return say("This channel is not mapped to a project.")
+    runtime.available ||= await pluginReady(runtime.client)
+    if (!runtime.available) return say("The project environment is unavailable.")
+
+    const { client, channel } = runtime
+    const inputs = m.files.length ? await inputsOf(client, channel.model) : []
+    const refused = m.files.map((file) => refusal(file, inputs, channel.model)).filter(Boolean)
+    if (refused.length) return say(refused.join("\n"))
+    const files = []
+    for (const file of m.files) files.push(await store(channel, threadTs, file, slack.download))
+
+    let sessionId = thread?.session_id
+    if (!sessionId) {
+      sessionId = await createSession(client, channel.serverDir, channel.model)
+      db.addThread({ team_id: m.teamId, channel_id: m.channelId, thread_ts: threadTs, session_id: sessionId })
+    }
+    await prompt(client, sessionId, m.text.trim() || "The owner sent the attached files.", files)
+  }
+
+  async function click(userId: string, decision: "once" | "reject", value: string, channelId: string, threadTs?: string) {
+    const { sessionId, requestId } = JSON.parse(value) as { sessionId: string; requestId: string }
+    const refuse = (text: string) => slack.ephemeral(channelId, userId, threadTs, text)
+    if (userId !== config.ownerUserId) return refuse("Only the owner can approve or reject actions.")
+    const row = db.approval(requestId)
+    if (!row || row.session_id !== sessionId || !db.claim(requestId, decision === "once" ? "approved" : "rejected")) {
+      return refuse("This request was already decided.")
+    }
+    const { client } = channels.get(row.channel_id)!
+    try {
+      await decide(client, sessionId, requestId, decision)
+    } catch {
+      db.reopen(requestId)
+      return refuse("OpenCode did not accept the decision. Try again.")
+    }
+    await serial(async () => {
+      await settle(row, decision === "once" ? `Approved once by <@${userId}>` : `Rejected by <@${userId}>`)
+      if (decision === "reject") await sweep(client, sessionId, "Rejected together with another request")
     })
   }
 
-  async function replyInThread(threadTs: string, channelId: string, text: string) {
-    const ts = await slack.post(channelId, threadTs, text)
-    return ts
+  async function expire() {
+    const cutoff = Date.now() - config.approvalTimeoutMinutes * 60_000
+    for (const row of db.pendingApprovals()) {
+      if (row.asked_at > cutoff || !db.claim(row.request_id, "expired")) continue
+      const { client } = channels.get(row.channel_id)!
+      await decide(client, row.session_id, row.request_id, "reject").catch(() => undefined)
+      await settle(row, "Rejected because nobody answered in time")
+      await sweep(client, row.session_id, "Rejected together with another request").catch(() => undefined)
+    }
   }
 
-  async function handle(message: Incoming) {
-    if (message.userId !== config.ownerUserId) {
-      await slack.ephemeral(message.channelId, message.userId, "Only the owner can talk to OpenCode here.")
-      return
+  async function recover() {
+    for (const reply of db.streamingReplies()) {
+      await slack.update(reply.channel_id, reply.message_ts, "The bridge restarted during the run.")
+      db.setReply(reply.message_ts, "failed")
     }
-
-    const runtime = channels.get(message.channelId)
-    const threadTs = message.threadTs ?? message.ts
-    if (!runtime) {
-      if (message.mention) await replyInThread(threadTs, message.channelId, "This channel is not mapped to a project.")
-      return
-    }
-    if (!runtime.available) {
-      if (message.mention || message.threadTs) {
-        await replyInThread(threadTs, message.channelId, "The project environment is unavailable.")
+    for (const [channelId, { client, available }] of channels) {
+      if (!available) continue
+      for (const thread of db.threads(channelId)) {
+        const live = await pending(client, thread.session_id).catch(() => undefined)
+        if (!live) continue
+        const ids = new Set(live.map((request) => request.id))
+        for (const row of db.pendingApprovals(thread.session_id)) {
+          if (!ids.has(row.request_id) && db.claim(row.request_id, "expired")) await settle(row, "No longer pending after a restart")
+        }
+        for (const request of live) await ask(request)
       }
-      return
     }
-
-    const existing = db.thread(message.teamId, message.channelId, threadTs)
-    if (!existing && !message.mention) return
-
-    let sessionId = existing?.session_id
-    if (!sessionId) {
-      sessionId = await createSession(runtime.client, runtime.channel.serverDir, runtime.channel.model)
-      db.insertThread({
-        team_id: message.teamId,
-        channel_id: message.channelId,
-        thread_ts: threadTs,
-        session_id: sessionId,
-      })
-    }
-
-    let run = live.get(sessionId)
-    if (!run) {
-      run = {
-        sessionId,
-        teamId: message.teamId,
-        channelId: message.channelId,
-        threadTs,
-        text: "",
-        parts: [],
-        lastEdit: 0,
-        busy: false,
-        pendingNext: false,
-      }
-      live.set(sessionId, run)
-    }
-
-    const text = message.text.replace(/<@[A-Z0-9]+>/g, "").trim()
-    if (run.busy) {
-      run.pendingNext = true
-      await prompt(runtime.client, sessionId, text, "queue")
-      return
-    }
-    run.busy = true
-    await prompt(runtime.client, sessionId, text)
   }
 
-  return { handle, onEvent }
+  return {
+    handle,
+    click,
+    onEvent: (event: AgentEvent) => void serial(() => apply(event)),
+    expire: () => serial(expire),
+    recover: () => serial(recover),
+  }
 }
