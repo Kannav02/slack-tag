@@ -10,12 +10,16 @@ Agents update their row when they start, open a PR, and finish verification. Sta
 
 | Slice | Status | Branch or PR | Verified by, date |
 | --- | --- | --- | --- |
-| S1. Verify the safety plugin on OpenCode 2.0.15 | needs owner check | cursor/slack-tag-s1-plugin-d50a | agent, 2026-09-25 |
-| S2. Run a text conversation from Slack | needs owner check | cursor/slack-tag-s2-bridge-9743 | agent, 2026-09-25. Slack app posts need owner: SLACK_BOT_TOKEN and SLACK_APP_TOKEN are not set here. |
-| S3. Approve or reject actions from Slack | not started | | |
-| S4. Send attachments to the agent | not started | | |
-| S5. Isolate each channel in a container | needs owner check | cursor/slack-tag-s5-containers-dbdf | agent, 2026-09-25. Isolation checks passed under runc. Slack steps need the owner. |
-| S6. Deploy to the VPS and run the real Go smoke | not started | | |
+All six slices are integrated in one branch, `cursor/slack-tag-debloat-376f` ([PR #3](https://github.com/Kannav02/slack-tag/pull/3)), which replaces the separate slice branches. "Router" below means the checks drove the bridge's message, click, and event handlers against real OpenCode 2.0.15 servers, with a recorder in place of the Slack Web API. No Slack app tokens were available, so nothing was posted to Slack.
+
+| Slice | Status | Branch or PR | Verified by, date |
+| --- | --- | --- | --- |
+| S1. Verify the safety plugin on OpenCode 2.0.15 | needs owner check | PR #3 | agent, 2026-09-25. Steps 1 to 6 rerun after the policy rewrite. Steps 7 and 8 from the S1 run. |
+| S2. Run a text conversation from Slack | needs owner check | PR #3 | agent, 2026-09-25. Steps 1 to 10 through the router with `opencode-go/kimi-k2.7-code`. Live Slack posts need the owner. |
+| S3. Approve or reject actions from Slack | needs owner check | PR #3 | agent, 2026-09-25. Steps 1 to 10 through the router with the fake model. Button clicks in Slack need the owner. |
+| S4. Send attachments to the agent | needs owner check | PR #3 | agent, 2026-09-25. Steps 1 to 8 through the router with Kimi and `glm-5.2`. Real Slack uploads need the owner. |
+| S5. Isolate each channel in a container | needs owner check | PR #3 | agent, 2026-09-25. Steps 1 to 10 under `runsc` through the router. Live Slack posts need the owner. |
+| S6. Deploy to the VPS and run the real Go smoke | needs owner check | PR #3 | Unit, env templates, and `docs/deploy.md` written. No VPS access, so every step needs the owner. |
 
 ## How to run a slice
 
@@ -174,7 +178,7 @@ Put secrets in Cursor Dashboard > Cloud Agents > Secrets. On the VPS they live i
 
 Use a separate Slack app for cloud agents, for example "OpenCode (dev)" in a test workspace. Socket Mode splits events between every connection that uses the same app token, so a cloud agent's bridge and the VPS bridge must not share one.
 
-The Slack app needs Socket Mode, interactivity, the bot events `app_mention`, `message.channels`, and `message.groups`, and the bot scopes `app_mentions:read`, `channels:history`, `groups:history`, `chat:write`, and `files:read`. Invite the bot to the test channels.
+The Slack app needs Socket Mode, interactivity, the bot events `app_mention`, `message.channels`, and `message.groups`, and the bot scopes `app_mentions:read`, `channels:history`, `groups:history`, `chat:write`, and `files:read`. Invite the bot to the test channels. The bridge reads mentions from `message` events, because those carry the uploaded files, so `app_mention` is subscribed but unused.
 
 | Variable | What it is | Needed by |
 | --- | --- | --- |
@@ -225,7 +229,7 @@ When done, run every step of the S1 manual verification checklist yourself and r
 
 Start a 2.0.15 server the way `spike/v2/run.sh` does, with a throwaway home, the fake model, and `deploy/opencode.global.jsonc` as the global config. Set `OPENCODE_API_KEY=canary-not-a-real-key` in the server environment for steps 1 to 6. Drive prompts with `spike/v2/dump-events.mjs` or a short script. The fake model runs `RUN: <command>` as a shell call.
 
-- [ ] 1. `curl -s -u opencode:$OPENCODE_SERVER_PASSWORD -X POST http://127.0.0.1:4096/api/rpc/slack-tag/status -H 'content-type: application/json' -d '{}'` returns the plugin version and the `POLICY_VERSION` from `plugin/src/policy.ts`. Pass when both values match the source.
+- [ ] 1. `curl -s -u opencode:$OPENCODE_SERVER_PASSWORD -X POST http://127.0.0.1:4096/api/rpc/slack-tag/status -H 'content-type: application/json' -d '{"input":{}}'` returns the plugin version and the `POLICY_VERSION` from `plugin/src/policy.ts`. Pass when both values match the source.
 - [ ] 2. Send `RUN: ls`. Pass when the run ends with `session.execution.succeeded` and no `permission.asked` event.
 - [ ] 3. Send `RUN: touch asked.txt`. Pass when a `permission.asked` event arrives and `asked.txt` does not exist 5 seconds later. Reply `reject` and confirm the file is still absent.
 - [ ] 4. Send `RUN: git push origin main`. Pass when the tool fails with `Blocked by configuration policy` and no `permission.asked` event arrives.
