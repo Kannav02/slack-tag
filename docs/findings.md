@@ -1,13 +1,18 @@
 # Findings
 
-Research and compatibility results that inform the V1 implementation. Decisions agreed with the owner are recorded in `SPEC.md`; this file holds the evidence and the questions still open.
+Research and compatibility results that inform the V1 implementation. Decisions agreed with the owner are recorded in `SPEC.md`; this file holds the evidence and the questions still open. The design, the proposed defaults, and the build slices are in `docs/plan.md`.
 
 ## Agreed
 
-- Backend: OpenCode v2, pinned to `@opencode/cli` and `@opencode/client` 2.0.15. The V1 server API and plugins are not used.
+- Backend: OpenCode v2, pinned to `@opencode/cli`, `@opencode/client`, and `@opencode/plugin` 2.0.15. The OpenCode v1 server API and v1 plugins are not used.
 - Inference: the owner's OpenCode Go subscription, through OpenCode's built-in `opencode-go` provider. The key is read from `OPENCODE_API_KEY`. Anthropic subscriptions are not used.
 - Slack: the bot is tagged as `@OpenCode`.
 - Hosting: the owner's VPS.
+- Bridge: Node.js and TypeScript on the VPS host, Slack Socket Mode, owner-only messages and clicks, a fixed channel-to-project config, SQLite for thread links, pending approvals, and Slack message ids.
+- Isolation: one container per mapped channel, gVisor if available, running `opencode serve` with only that project mounted read-write and its own data volume. No Slack tokens in the container.
+- Safety plugin: a small OpenCode v2 server plugin, loaded read-only from the global config. It applies the allow/ask/deny policy through the permission `evaluate` hook, removes secrets from agent shells through the shell `create.before` hook, and reports its policy version over an RPC the bridge checks at startup.
+- Egress: no proxy in V1. The Go key is passed to the container as an environment variable, and the plugin removes it from agent shells. This stops casual leaks, not a determined agent. A proxy can be added later.
+- Verification: manual checklists per slice, no automated tests.
 
 ## Verified against OpenCode v2 2.0.15
 
@@ -29,26 +34,35 @@ Reproduce with `spike/v2/run.sh` (fake model, no key) and `spike/v2/real.sh` (re
 | Go images | `opencode-go/kimi-k2.7-code` advertises `capabilities.input` of `text`, `image`, and `video`. A `session.prompt` with a solid blue PNG attached as `files: [{ uri: "file:///…/sample.png" }]` (neutral filename) finished `session.execution.succeeded` and replied `Blue`, with no tool call. `minimax-m3` also advertises image input; `glm-5.2` advertises `text` only. Other connected Go models that advertise `image` include `kimi-k3`, `glm-5.3-flash`, `qwen3.8-flash`, and `deepseek-v4.1-flash`. |
 | Go headers | OpenCode sends its own `user-agent` and `x-opencode-session` on model requests, as Go requires. A proxy in front must forward them. |
 
+## Plugin API at 2.0.15 (declared, not yet run)
+
+Slice S1 in `docs/plan.md` verifies these at runtime. Until then they come from the 2.0.15 type definitions in the npm package and from the latest docs.
+
+- `@opencode/plugin` 2.0.15 exists on npm. The latest release is 2.0.16, so the version must be pinned.
+- The 2.0.15 types declare `ctx.permission.hook("evaluate")`, `ctx.shell.hook("create.before")`, the session `context` hook, and the `@opencode/plugin/rpc` export. `@opencode/client` 2.0.15 also exports RPC support.
+- The docs say the permission hook runs for `allow` and `ask` results and may change the effect to `allow`, `ask`, or `deny`. A configured `deny` is final and does not call the hook.
+- The docs say OpenCode loads plugins from `.opencode/plugins/` automatically and from the `plugins` list in any `opencode.json(c)`. The agent must therefore not be able to write `.opencode/` or project config.
+
 ## OpenCode Go constraints
 
 - Limits are a dollar budget per model: 20% per rolling 5 hours, 50% per week, 100% per month. Expensive models (Kimi K3, Qwen3.8 Max, Grok) allow roughly 100–200 requests per 5 hours; budget models allow thousands. One agent task can use tens of requests.
 - At the limit Go returns HTTP 429 with `Retry-After`. The bridge must report it in the thread.
 - Only some Go models accept images; check the model's `capabilities.input` before sending attachments.
 
-## Design direction (not yet agreed)
+## Design notes
 
-- A bridge process holds the Slack tokens and connects with Socket Mode.
-- One gVisor container per mapped channel runs `opencode serve` with only that project mounted and its own data volume.
-- An egress proxy is the only route out, with a per-project allowlist. It can add the Go key so containers never hold it.
 - The container is the security boundary. Approvals control intent; allowed commands such as tests still run arbitrary project code.
-- The agent must not be able to change its own policy: keep the permission rules and policies in the global config, and mount `opencode.json` and `.opencode/` read-only.
+- The agent must not be able to change its own policy: keep the permission rules, the policies, and the plugin in the global config, and mount `opencode.json`, `opencode.jsonc`, and `.opencode/` read-only.
+- Removing the key from agent shells does not hide it from a process that reads the server's environment, for example through `/proc`. An egress proxy that adds the key would close this; it is deferred.
 
 ## Open questions
 
+Proposed defaults for questions 1, 3, 5, 6, 7, and 8 are in `docs/plan.md`. They await the owner's agreement.
+
 1. Default Go model per channel, given the 5-hour limits.
-2. Whether the Go key sits in the container or is added by the proxy.
+2. Resolved for V1: the Go key sits in the container, and no proxy is used.
 3. Whether the agent may push to git, and with what credential.
-4. Outbound allowlist per project.
+4. Resolved for V1: no outbound allowlist, because there is no egress proxy.
 5. The concrete allow/ask/deny policy, and the approval timeout.
 6. Whether owner replies in a bound thread continue the session without a mention.
 7. `queue` or `steer` for messages sent while the agent is busy.
