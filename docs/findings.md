@@ -67,5 +67,15 @@ Proposed defaults for questions 1, 3, 5, 6, 7, and 8 are in `docs/plan.md`. They
 6. Whether owner replies in a bound thread continue the session without a mention.
 7. `queue` or `steer` for messages sent while the agent is busy.
 8. Fixed Compose containers or containers started on demand by the bridge.
-9. VPS size, whether `/dev/kvm` exists, where project folders live, and whether Docker is installed.
-10. Whether private channels are used.
+9. VPS size, whether `/dev/kvm` exists, where project folders live, and whether Docker is installed. Still unknown. S6 did not open an SSH session.
+10. Whether private channels are used. Still unknown. S6 did not open an SSH session.
+
+## S6 deploy files
+
+Checked on a local stand-in for `/etc` and `/var`, not on the VPS.
+
+- `deploy/slack-tag.service` starts `node --experimental-strip-types --experimental-sqlite src/main.ts` with working directory `/opt/slack-tag/bridge`. systemd reads `/etc/slack-tag/bridge.env`. `StateDirectory=slack-tag` creates `/var/lib/slack-tag` on start. `Restart=on-failure` covers crashes. Boot return comes from `WantedBy=multi-user.target`.
+- `deploy/bridge.env.example` names `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OPENCODE_SERVER_PASSWORD`, and `SLACK_TAG_CONFIG`. Values are empty. The bridge writes `slack-tag.sqlite` beside the config file, so the example points `SLACK_TAG_CONFIG` at `/var/lib/slack-tag/config.json`.
+- `deploy/opencode.env.example` names `OPENCODE_API_KEY` and `OPENCODE_SERVER_PASSWORD`. Values are empty. This file is the one S5's containers should receive. It has no Slack token.
+- Container `restart: unless-stopped` waits for `deploy/compose.yaml` from S5. This slice does not add that file.
+- gVisor's default platform does not need `/dev/kvm`. Whether this VPS has KVM, Docker, or a chosen project directory is still open question 9.

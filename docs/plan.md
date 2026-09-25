@@ -15,7 +15,7 @@ Agents update their row when they start, open a PR, and finish verification. Sta
 | S3. Approve or reject actions from Slack | not started | | |
 | S4. Send attachments to the agent | not started | | |
 | S5. Isolate each channel in a container | not started | | |
-| S6. Deploy to the VPS and run the real Go smoke | not started | | |
+| S6. Deploy to the VPS and run the real Go smoke | needs owner check | cursor/slack-tag-s6-deploy-d983 | agent, 2026-09-25. Unit and env templates checked locally. VPS checklist needs owner. |
 
 ## How to run a slice
 
