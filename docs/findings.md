@@ -58,6 +58,10 @@ Checked against a 2.0.15 server with `deploy/opencode.global.jsonc` and the fake
 - The agent must not be able to change its own policy: keep the permission rules, the policies, and the plugin in the global config, and mount `opencode.json`, `opencode.jsonc`, and `.opencode/` read-only.
 - Removing the key from agent shells does not hide it from a process that reads the server's environment, for example through `/proc`. An egress proxy that adds the key would close this; it is deferred.
 
+## S3 buttons
+
+The bridge posts `permission.asked` as Approve and Reject. Approve sends `once`. Reject sends `reject`. A different Slack user is refused and the command stays unexecuted. The bridge has no code path that sends `always`. A local thread page drives the same handlers when Slack tokens are unset. Checked against OpenCode 2.0.15 and the fake model: `touch approved.txt` created the file only after Approve; `touch rejected.txt` stayed absent after Reject.
+
 ## Open questions
 
 Proposed defaults for questions 1, 3, 5, 6, 7, and 8 are in `docs/plan.md`. They await the owner's agreement.

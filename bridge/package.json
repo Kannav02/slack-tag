@@ -1,0 +1,9 @@
+{
+  "name": "@slack-tag/bridge",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@opencode/client": "2.0.15",
+    "@slack/bolt": "4.4.0"
+  }
+}

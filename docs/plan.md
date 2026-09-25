@@ -12,7 +12,7 @@ Agents update their row when they start, open a PR, and finish verification. Sta
 | --- | --- | --- | --- |
 | S1. Verify the safety plugin on OpenCode 2.0.15 | needs owner check | cursor/slack-tag-s1-plugin-d50a | agent, 2026-09-25 |
 | S2. Run a text conversation from Slack | not started | | |
-| S3. Approve or reject actions from Slack | not started | | |
+| S3. Approve or reject actions from Slack | needs owner check | cursor/slack-tag-s3-approvals-0335 | agent local demo, 2026-09-25 |
 | S4. Send attachments to the agent | not started | | |
 | S5. Isolate each channel in a container | not started | | |
 | S6. Deploy to the VPS and run the real Go smoke | not started | | |
@@ -284,9 +284,11 @@ Create a test project with `AGENTS.md` containing "End every reply with the word
 
 ## S3. Approve or reject actions from Slack
 
-**Goal.** A restricted action waits for the owner. Approve runs it once. Reject, a timeout, or a non-owner click leaves it unexecuted.
+**Goal.** A restricted action waits for the owner. Approve runs it once. Reject, or a non-owner click, leaves it unexecuted.
 
-**Depends on.** S2.
+The first build is the buttons only. There is no approval timeout, no `approvals` table, and no prompt rebuild after a restart. An ignored prompt holds that thread's run until Reject. Silence still does not run the command.
+
+**Depends on.** S2. The bridge in this branch is the smallest piece that can post the prompt and answer it. S2's Slack routing is not built yet.
 
 **Covers.** Restricted actions. Automatic actions. Owner-only access for approval clicks. Persistence of pending approvals. The OpenCode adapter for permission decisions.
 
