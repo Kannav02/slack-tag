@@ -34,14 +34,17 @@ Reproduce with `spike/v2/run.sh` (fake model, no key) and `spike/v2/real.sh` (re
 | Go images | `opencode-go/kimi-k2.7-code` advertises `capabilities.input` of `text`, `image`, and `video`. A `session.prompt` with a solid blue PNG attached as `files: [{ uri: "file:///…/sample.png" }]` (neutral filename) finished `session.execution.succeeded` and replied `Blue`, with no tool call. `minimax-m3` also advertises image input; `glm-5.2` advertises `text` only. Other connected Go models that advertise `image` include `kimi-k3`, `glm-5.3-flash`, `qwen3.8-flash`, and `deepseek-v4.1-flash`. |
 | Go headers | OpenCode sends its own `user-agent` and `x-opencode-session` on model requests, as Go requires. A proxy in front must forward them. |
 
-## Plugin API at 2.0.15 (declared, not yet run)
+## Plugin API at 2.0.15 (run during S1)
 
-Slice S1 in `docs/plan.md` verifies these at runtime. Until then they come from the 2.0.15 type definitions in the npm package and from the latest docs.
+Checked against a 2.0.15 server with `deploy/opencode.global.jsonc` and the fake model, then once with `opencode-go/kimi-k2.7-code`.
 
-- `@opencode/plugin` 2.0.15 exists on npm. The latest release is 2.0.16, so the version must be pinned.
-- The 2.0.15 types declare `ctx.permission.hook("evaluate")`, `ctx.shell.hook("create.before")`, the session `context` hook, and the `@opencode/plugin/rpc` export. `@opencode/client` 2.0.15 also exports RPC support.
-- The docs say the permission hook runs for `allow` and `ask` results and may change the effect to `allow`, `ask`, or `deny`. A configured `deny` is final and does not call the hook.
-- The docs say OpenCode loads plugins from `.opencode/plugins/` automatically and from the `plugins` list in any `opencode.json(c)`. The agent must therefore not be able to write `.opencode/` or project config.
+- A `plugins` entry must be a directory. A file path logs `configured plugin path must be a directory` and does not load. The directory entry is `index.ts`. `index.mjs` is resolved and not executed. `Plugin.define({ id, setup })` from `@opencode/plugin` runs.
+- A path in the config is resolved from the config file's directory. `../plugin` in `deploy/opencode.global.jsonc` is the repo `plugin/` directory when that file is the one OpenCode reads.
+- `POST /api/rpc/slack-tag/status` with `{"input":{}}` returns `{"output":{"pluginVersion":"1","policyVersion":1}}`. A body of `{}` returns `rpc.invalid_input` (`Expected object`). The checklist curl uses `{}`. The working body on 2.0.15 is `{"input":{}}`.
+- A shell permission uses action `shell` and the command as the resource, for example `["ls"]`. `RUN: ls` finishes `session.execution.succeeded` with no `permission.asked`. `RUN: touch asked.txt` emits `permission.asked`, and `reject` leaves the file absent. `RUN: git push origin main` fails with `permission.rejected` / `Blocked by configuration policy` and no prompt. `RUN: sudo ls` fails with `Blocked by the safety plugin` and no prompt.
+- `create.before` runs before the shell. Deleting `OPENCODE_API_KEY` is not enough when another variable's value re-exports it. The hook also drops any value that contains `OPENCODE_API_KEY`, `OPENCODE_SERVER_PASSWORD`, or `SLACK_`. After `once` on `env > env.txt`, `grep -c` of those names is `0`. With the real Go model, `echo KEY=${OPENCODE_API_KEY:-unset}` replies `KEY=unset`.
+- Project plugins load. A directory `.opencode/plugins/marker/index.ts` writes its marker on startup. A `plugins` directory in the project's `opencode.json` does the same. Both are loads, so S5 still needs those paths read-only.
+- Read, edit, and web action names were not emitted by the fake model. The plugin treats `read`, `glob`, `grep`, `list`, and `search` as allow, `edit`, `write`, and `patch` as allow except protected paths, and `webfetch` and `websearch` as ask. Anything else is ask. The docs' permission example uses the action `read`.
 
 ## OpenCode Go constraints
 

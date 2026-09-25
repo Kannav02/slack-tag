@@ -10,7 +10,7 @@ Agents update their row when they start, open a PR, and finish verification. Sta
 
 | Slice | Status | Branch or PR | Verified by, date |
 | --- | --- | --- | --- |
-| S1. Verify the safety plugin on OpenCode 2.0.15 | not started | | |
+| S1. Verify the safety plugin on OpenCode 2.0.15 | needs owner check | cursor/slack-tag-s1-plugin-d50a | agent, 2026-09-25 |
 | S2. Run a text conversation from Slack | not started | | |
 | S3. Approve or reject actions from Slack | not started | | |
 | S4. Send attachments to the agent | not started | | |
