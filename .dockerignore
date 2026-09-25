@@ -1,0 +1,5 @@
+.git
+spike
+bridge/node_modules
+plugin/node_modules
+**/.env

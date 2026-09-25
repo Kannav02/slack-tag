@@ -1,0 +1,13 @@
+{
+  "ownerUserId": "U0123456789",
+  "approvalTimeoutMinutes": 30,
+  "channels": {
+    "C0123456789": {
+      "name": "alpha",
+      "projectDir": "/srv/slack-tag/projects/alpha",
+      "serverDir": "/project",
+      "opencodeUrl": "http://127.0.0.1:4101",
+      "model": "opencode-go/kimi-k2.7-code"
+    }
+  }
+}

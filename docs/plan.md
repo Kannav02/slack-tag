@@ -14,7 +14,7 @@ Agents update their row when they start, open a PR, and finish verification. Sta
 | S2. Run a text conversation from Slack | needs owner check | cursor/slack-tag-s2-bridge-9743 | agent, 2026-09-25. Slack app posts need owner: SLACK_BOT_TOKEN and SLACK_APP_TOKEN are not set here. |
 | S3. Approve or reject actions from Slack | not started | | |
 | S4. Send attachments to the agent | not started | | |
-| S5. Isolate each channel in a container | not started | | |
+| S5. Isolate each channel in a container | needs owner check | cursor/slack-tag-s5-containers-dbdf | agent, 2026-09-25. Isolation checks passed under runc. Slack steps need the owner. |
 | S6. Deploy to the VPS and run the real Go smoke | not started | | |
 
 ## How to run a slice

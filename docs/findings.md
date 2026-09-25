@@ -67,6 +67,18 @@ Verified against OpenCode 2.0.15 with `opencode-go/kimi-k2.7-code` by driving th
 - A message sent with `delivery: "queue"` stays in the same execution. `session.inbox.delivered` for that inbox item is the point where its text starts. The bridge closes the current Slack message there and streams the rest into a new message.
 - This environment is Node.js 22.14. `node:sqlite` and TypeScript type stripping both work behind `--experimental-sqlite` and `--experimental-strip-types`. The bridge start script passes those flags.
 
+## Slice S5
+
+Verified on this machine with Docker and `runc`. `runsc` is not installed, so S6 must repeat the isolation steps under gVisor.
+
+- The container user is uid 1000, the same as the bridge user on this machine. `deploy/prepare-project.sh` creates `.opencode/`, `opencode.json`, `opencode.jsonc`, `.git/hooks`, and `.slack-tag/inbox` before Compose starts, and makes the inbox group-writable for uid 1000. A root bridge on the VPS should write inbox files as uid 1000 or stay in group 1000.
+- `.git/hooks` and `.git/config` are read-only bind mounts on top of the writable project. Writes fail with "Read-only file system", so a hook written by the agent cannot run later on the host. The plugin deny remains as well.
+- The image root is read-only. The project and the OpenCode data volume are writable. The global config inside the image uses the absolute plugin path `/opt/slack-tag/plugin` because the container layout is not the repo layout that `../plugin` expects.
+- `docker inspect` on `alpha`: runtime `runc`, user `1000:1000`, `CapDrop` `ALL`, `no-new-privileges`, memory 2g, pid limit 512, port `127.0.0.1:4101` only. Mounts are the project read-write, the data volume, a `/tmp` tmpfs, and read-only `.opencode/`, `opencode.json`, `opencode.jsonc`, `.git/hooks`, and `.git/config`.
+- Writing `/project/hello.txt` from the container created `alpha/hello.txt` on the host with content `hi`. `../beta`, the absolute host path of `beta`, and the bridge env file were not visible. Writes to `.opencode/plugins` and `opencode.json` failed read-only, and the host file stayed `{}`. `mount -t tmpfs` failed. `docker exec env` and `/proc/1/environ` contain no `SLACK_` variable. The server process does have `OPENCODE_SERVER_PASSWORD` and `OPENCODE_API_KEY`; stripping those from agent shells is the plugin's job, already checked in S1.
+- After `docker compose restart alpha`, the plugin RPC still returned policy version 1 and `hello.txt` was still on the host. A Slack thread remembering the file needs the owner, because this run had no Slack app tokens.
+- Checklist steps that post to Slack (2, 3, 4, 8, and 9) are needs owner. Steps 1, 5, 6, 7, and 10 were run here, with the shell equivalents of 3, 5, 6, and 7 executed by `docker exec` rather than an approved Slack command. Step 8 waits on S4.
+
 ## Open questions
 
 Proposed defaults for questions 1, 3, 5, 6, 7, and 8 are in `docs/plan.md`. They await the owner's agreement.
