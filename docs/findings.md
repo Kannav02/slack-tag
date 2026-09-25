@@ -58,6 +58,15 @@ Checked against a 2.0.15 server with `deploy/opencode.global.jsonc` and the fake
 - The agent must not be able to change its own policy: keep the permission rules, the policies, and the plugin in the global config, and mount `opencode.json`, `opencode.jsonc`, and `.opencode/` read-only.
 - Removing the key from agent shells does not hide it from a process that reads the server's environment, for example through `/proc`. An egress proxy that adds the key would close this; it is deferred.
 
+## Slice S2
+
+Verified against OpenCode 2.0.15 with `opencode-go/kimi-k2.7-code` by driving the bridge's message handler and Slack poster. The dev Slack app tokens were not available, so nothing was posted to Slack.
+
+- `client.rpc(definition).status({})` returns the plugin version and policy version. A server started without the plugin makes that call fail, and the bridge treats the channel as unavailable.
+- A missing `OPENCODE_API_KEY` fails the run with `provider.no-route` and the message `Model unavailable: opencode-go/kimi-k2.7-code`. The bridge posts that text and does not present it as success.
+- A message sent with `delivery: "queue"` stays in the same execution. `session.inbox.delivered` for that inbox item is the point where its text starts. The bridge closes the current Slack message there and streams the rest into a new message.
+- This environment is Node.js 22.14. `node:sqlite` and TypeScript type stripping both work behind `--experimental-sqlite` and `--experimental-strip-types`. The bridge start script passes those flags.
+
 ## Open questions
 
 Proposed defaults for questions 1, 3, 5, 6, 7, and 8 are in `docs/plan.md`. They await the owner's agreement.

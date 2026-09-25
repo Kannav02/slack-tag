@@ -11,7 +11,7 @@ Agents update their row when they start, open a PR, and finish verification. Sta
 | Slice | Status | Branch or PR | Verified by, date |
 | --- | --- | --- | --- |
 | S1. Verify the safety plugin on OpenCode 2.0.15 | needs owner check | cursor/slack-tag-s1-plugin-d50a | agent, 2026-09-25 |
-| S2. Run a text conversation from Slack | not started | | |
+| S2. Run a text conversation from Slack | needs owner check | cursor/slack-tag-s2-bridge-9743 | agent, 2026-09-25. Slack app posts need owner: SLACK_BOT_TOKEN and SLACK_APP_TOKEN are not set here. |
 | S3. Approve or reject actions from Slack | not started | | |
 | S4. Send attachments to the agent | not started | | |
 | S5. Isolate each channel in a container | not started | | |
