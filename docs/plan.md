@@ -13,7 +13,7 @@ Agents update their row when they start, open a PR, and finish verification. Sta
 | S1. Verify the safety plugin on OpenCode 2.0.15 | not started | | |
 | S2. Run a text conversation from Slack | not started | | |
 | S3. Approve or reject actions from Slack | not started | | |
-| S4. Send attachments to the agent | not started | | |
+| S4. Send attachments to the agent | checked locally; live Slack steps need owner | cursor/slack-tag-s4-attachments-3a3a | agent, 2026-09-25 |
 | S5. Isolate each channel in a container | not started | | |
 | S6. Deploy to the VPS and run the real Go smoke | not started | | |
 

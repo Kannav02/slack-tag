@@ -55,6 +55,17 @@ Slice S1 in `docs/plan.md` verifies these at runtime. Until then they come from 
 - The agent must not be able to change its own policy: keep the permission rules, the policies, and the plugin in the global config, and mount `opencode.json`, `opencode.jsonc`, and `.opencode/` read-only.
 - Removing the key from agent shells does not hide it from a process that reads the server's environment, for example through `/proc`. An egress proxy that adds the key would close this; it is deferred.
 
+## S4 attachments
+
+Checked against OpenCode 2.0.15 with `opencode-go/kimi-k2.7-code` and `opencode-go/glm-5.2`.
+
+- `model.list` returns `capabilities.input`. Kimi advertises `text`, `image`, and `video`. `glm-5.2` advertises `text` only.
+- A PNG and a `.txt` file stored in `<projectDir>/.slack-tag/inbox/<thread_ts>/` and passed as `file://` URIs from `serverDir` were read by Kimi (`Blue`, and the word `MAPLE` from the text file). No tool call was required.
+- The bridge accepts an attachment only when its kind is `image`, `text`, or `video` and that kind is in `capabilities.input`. A `.zip` is refused before `session.create`. An image sent to `glm-5.2` is refused with the model name and does not create a session.
+- A second file with the same Slack name is stored with a `-2` suffix. `../../escape.txt` is stored as `escape.txt` inside the inbox. `.slack-tag/` in `.git/info/exclude` keeps the inbox out of `git status`.
+- Files larger than 20 MB are refused before a run. The optional plugin `context` hook is not part of this slice.
+- Live Slack upload steps need `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_OWNER_USER_TOKEN`. Those were not set in this run.
+
 ## Open questions
 
 Proposed defaults for questions 1, 3, 5, 6, 7, and 8 are in `docs/plan.md`. They await the owner's agreement.
