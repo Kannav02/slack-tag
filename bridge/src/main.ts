@@ -29,7 +29,7 @@ for (const [id, channel] of Object.entries(config.channels)) {
   console.log(`channel ${id} (${channel.name}) ${available ? "ready" : "unavailable"}`)
 }
 
-const app = new bolt.App({ token: botToken, appToken, socketMode: true })
+const app = new bolt.App({ token: botToken, appToken, socketMode: true, clientOptions: { slackApiUrl: process.env.SLACK_API_URL } })
 const slack: SlackApi = {
   async post(channel, thread_ts, text, blocks) {
     const posted = await app.client.chat.postMessage({ channel, thread_ts, text: redact(text), blocks: blocks as never })
