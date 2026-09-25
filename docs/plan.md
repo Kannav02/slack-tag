@@ -27,6 +27,7 @@ Agents update their row when they start, open a PR, and finish verification. Sta
 
 Every slice follows the same rules:
 
+- Work in poteto mode (`/poteto-mode`). Skip its steps that write or run automated tests.
 - No automated tests and no test files. Verification is the slice's manual checklist.
 - Never print, log, or commit a secret. Refer to secrets by variable name only.
 - Pin every `@opencode/*` package and the server to 2.0.15. The latest release is 2.0.16, and the docs describe the latest.
@@ -213,7 +214,7 @@ Slack has no API to click a button as a user. Button checks need the owner in th
 ```text
 You are building slice S1 of Slack Tag, a self-hosted Slack bridge to OpenCode. Read SPEC.md, docs/findings.md, and docs/plan.md in full first. Your task is the section "S1. Verify the safety plugin on OpenCode 2.0.15" in docs/plan.md.
 
-Work on a new branch named cursor/slack-tag-s1-plugin-<suffix>. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to OPENCODE_API_KEY and OPENCODE_SERVER_PASSWORD by name only. Pin @opencode/plugin, @opencode/client, and @opencode/cli to exactly 2.0.15.
+Work on a new branch named cursor/slack-tag-s1-plugin-<suffix>. Use /poteto-mode, and skip its automated-test steps. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to OPENCODE_API_KEY and OPENCODE_SERVER_PASSWORD by name only. Pin @opencode/plugin, @opencode/client, and @opencode/cli to exactly 2.0.15.
 
 Build plugin/ and deploy/opencode.global.jsonc as the S1 section describes, using the starting policy table in docs/plan.md. The docs at https://opencode.ai/v2/docs/build/plugins describe a newer release, so check every hook against the 2.0.15 type definitions and against a running 2.0.15 server. Reuse spike/v2 (run.sh, mock-model.mjs, dump-events.mjs, real.sh) as manual tools to drive a server with the fake model or the real Go model.
 
@@ -259,7 +260,7 @@ Start a 2.0.15 server the way `spike/v2/run.sh` does, with a throwaway home, the
 ```text
 You are building slice S2 of Slack Tag, a self-hosted Slack bridge to OpenCode. Read SPEC.md, docs/findings.md, and docs/plan.md in full first. Your task is the section "S2. Run a text conversation from Slack" in docs/plan.md.
 
-Work on a new branch named cursor/slack-tag-s2-bridge-core-<suffix>. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_*_USER_TOKEN, OPENCODE_API_KEY, and OPENCODE_SERVER_PASSWORD by name only, and keep them out of logs. Pin @opencode/client and @opencode/cli to exactly 2.0.15.
+Work on a new branch named cursor/slack-tag-s2-bridge-core-<suffix>. Use /poteto-mode, and skip its automated-test steps. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_*_USER_TOKEN, OPENCODE_API_KEY, and OPENCODE_SERVER_PASSWORD by name only, and keep them out of logs. Pin @opencode/client and @opencode/cli to exactly 2.0.15.
 
 Build bridge/ as the S2 section and the design summary in docs/plan.md describe. Follow the config shape and the SQLite tables given there. Run OpenCode 2.0.15 as a local host process with deploy/opencode.global.jsonc and the plugin from S1, and write a local bridge config from SLACK_OWNER_ID, SLACK_TEST_CHANNEL_ID, and SLACK_UNMAPPED_CHANNEL_ID. Use the dev Slack app from the secrets, never the production app.
 
@@ -305,7 +306,7 @@ Create a test project with `AGENTS.md` containing "End every reply with the word
 ```text
 You are building slice S3 of Slack Tag, a self-hosted Slack bridge to OpenCode. Read SPEC.md, docs/findings.md, and docs/plan.md in full first. Your task is the section "S3. Approve or reject actions from Slack" in docs/plan.md.
 
-Work on a new branch named cursor/slack-tag-s3-approvals-<suffix>. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to Slack tokens, OPENCODE_API_KEY, and OPENCODE_SERVER_PASSWORD by name only. Keep @opencode/* at exactly 2.0.15. The bridge must never send the "always" permission reply.
+Work on a new branch named cursor/slack-tag-s3-approvals-<suffix>. Use /poteto-mode, and skip its automated-test steps. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to Slack tokens, OPENCODE_API_KEY, and OPENCODE_SERVER_PASSWORD by name only. Keep @opencode/* at exactly 2.0.15. The bridge must never send the "always" permission reply.
 
 Extend bridge/ as the S3 section describes. Run OpenCode 2.0.15 as a local host process with deploy/opencode.global.jsonc and the S1 plugin, so the real policy applies. For deterministic runs you may use the fake model from spike/v2, where "RUN: <command>" makes a shell call. Use the real Go model for at least steps 1 and 2.
 
@@ -351,7 +352,7 @@ Use the S2 setup. For a shorter timeout during step 6, set `approvalTimeoutMinut
 ```text
 You are building slice S4 of Slack Tag, a self-hosted Slack bridge to OpenCode. Read SPEC.md, docs/findings.md, and docs/plan.md in full first. Your task is the section "S4. Send attachments to the agent" in docs/plan.md.
 
-Work on a new branch named cursor/slack-tag-s4-attachments-<suffix>. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to Slack tokens, OPENCODE_API_KEY, and OPENCODE_SERVER_PASSWORD by name only, and never put a token in a logged URL. Keep @opencode/* at exactly 2.0.15.
+Work on a new branch named cursor/slack-tag-s4-attachments-<suffix>. Use /poteto-mode, and skip its automated-test steps. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to Slack tokens, OPENCODE_API_KEY, and OPENCODE_SERVER_PASSWORD by name only, and never put a token in a logged URL. Keep @opencode/* at exactly 2.0.15.
 
 Extend bridge/ as the S4 section describes. Filenames from Slack are untrusted input. Use the real Go model opencode-go/kimi-k2.7-code, which accepts images, and opencode-go/glm-5.2, which accepts text only, for the unsupported-image check.
 
@@ -396,7 +397,7 @@ Use the S2 setup. Make a solid blue PNG named `sample.png` and a text file `note
 ```text
 You are building slice S5 of Slack Tag, a self-hosted Slack bridge to OpenCode. Read SPEC.md, docs/findings.md, and docs/plan.md in full first. Your task is the section "S5. Isolate each channel in a container" in docs/plan.md.
 
-Work on a new branch named cursor/slack-tag-s5-containers-<suffix>. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to Slack tokens, OPENCODE_API_KEY, and OPENCODE_SERVER_PASSWORD by name only, and pass them through env files that are not committed. Keep @opencode/* at exactly 2.0.15.
+Work on a new branch named cursor/slack-tag-s5-containers-<suffix>. Use /poteto-mode, and skip its automated-test steps. Do not add automated tests or test files. Never print, log, or commit secrets. Refer to Slack tokens, OPENCODE_API_KEY, and OPENCODE_SERVER_PASSWORD by name only, and pass them through env files that are not committed. Keep @opencode/* at exactly 2.0.15.
 
 Build deploy/ as the S5 section describes. Install Docker if your environment lacks it. Try gVisor (runsc). If it cannot run in your environment, verify with runc and record that the VPS check in S6 must repeat the isolation steps under runsc.
 
@@ -440,7 +441,7 @@ Create two projects, `alpha` and `beta`, under one parent folder. Put `beta-secr
 ```text
 You are building slice S6 of Slack Tag, a self-hosted Slack bridge to OpenCode. Read SPEC.md, docs/findings.md, and docs/plan.md in full first. Your task is the section "S6. Deploy to the VPS and run the real Go smoke" in docs/plan.md.
 
-Work on a new branch named cursor/slack-tag-s6-deploy-<suffix>. Do not add automated tests or test files. Never print, log, or commit secrets, and never copy them into the repository or into command lines that are logged. Keep @opencode/* at exactly 2.0.15.
+Work on a new branch named cursor/slack-tag-s6-deploy-<suffix>. Use /poteto-mode, and skip its automated-test steps. Do not add automated tests or test files. Never print, log, or commit secrets, and never copy them into the repository or into command lines that are logged. Keep @opencode/* at exactly 2.0.15.
 
 Write deploy/slack-tag.service, the env file templates without values, and docs/deploy.md. If VPS_SSH_HOST and VPS_SSH_KEY are set, deploy to the VPS and run the S6 checklist there. Otherwise write docs/deploy.md so the owner can run it, and mark every checklist step "needs owner". Do not reboot or change the VPS beyond what docs/deploy.md describes without the owner's confirmation.
 
