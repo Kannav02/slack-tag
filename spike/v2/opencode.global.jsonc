@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "mock/mock",
+  "autoupdate": false,
+  "providers": {
+    "mock": {
+      "name": "Mock",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": { "baseURL": "http://127.0.0.1:4010/v1", "apiKey": "unused" },
+      "models": { "mock": { "name": "Mock" } }
+    }
+  },
+  "permissions": [
+    { "action": "shell", "resource": "*", "effect": "ask" }
+  ],
+  "experimental": {
+    "policies": [
+      { "action": "permission", "resource": "shell:git push *", "effect": "deny" }
+    ]
+  }
+}

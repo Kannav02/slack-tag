@@ -1,6 +1,6 @@
 # Slack Bridge: V1
 
-Status: requirements agreed; Bun/TypeScript dependency setup added; feature implementation not started.
+Status: V1 implementation is integrated; manual owner checks remain in `docs/plan.md`.
 Tracking: local specification only. No external issue tracker or publishing.
 
 ## Problem Statement
@@ -73,7 +73,10 @@ OpenCode is the first supported backend. A small common agent interface and back
 - Implement only the OpenCode adapter in V1. Future adapters translate their backend's RPC or equivalent structured protocol into this interface.
 - Streaming support alone does not establish compatibility. Sessions, attachments, authentication, and permission behavior must be verified separately. Unsupported capabilities must be explicit rather than silently bypassed.
 - The bridge uses the backend's supported login/provider configuration. It does not promise that every subscription can be reused with every agent.
-- Selected stack: TypeScript on Bun, Slack Bolt with Socket Mode, SQLite for bridge mappings, and rootless Podman for project isolation. Target OpenCode V2 through its network client, not the embedded SDK. OpenCode server/client 2.0.3 is the current verification baseline, not yet an integration-tested compatibility claim. See [OpenCode interface reference](opencode-interface.md) for the version-specific contract and pending behavior checks.
+- V1 targets OpenCode v2 through `@opencode/client`, pinned with the server to 2.0.15. Required capabilities were verified in `spike/v2`; see `docs/findings.md`.
+- Inference uses the owner's OpenCode Go subscription via OpenCode's `opencode-go` provider. Anthropic subscriptions are not used.
+- The Slack bot is addressed as `@OpenCode` and runs on the owner's VPS.
+- The bridge is Node.js and TypeScript, stores its state in SQLite, and connects to Slack with Socket Mode. The design and the slices are in `docs/plan.md`.
 
 ### Permissions and isolation
 
@@ -83,6 +86,8 @@ OpenCode is the first supported backend. A small common agent interface and back
 - Approval does not expand container mounts, host privileges, or other hard isolation boundaries.
 - The concrete allow/ask/deny policy must be defined and verified during implementation. "Dangerous" is a product intent, not a complete executable policy, and command-name matching alone is not a security guarantee.
 - Slack credentials belong to the bridge and must not be exposed to the project agent. Backend credentials receive only the access necessary for supported authentication.
+- A small OpenCode server plugin, loaded from the global config, applies the allow/ask/deny policy and removes secrets from agent shell environments. The agent must not be able to add or change plugins or project config.
+- V1 has no egress proxy. The OpenCode Go key is passed to the project container, and the plugin removes it from agent shells. This stops casual leaks, not a determined agent. A proxy may be added later.
 
 ### Slack inputs and outputs
 
@@ -93,9 +98,13 @@ OpenCode is the first supported backend. A small common agent interface and back
 
 ## Testing Decisions
 
-Test each V1 feature's observable behavior, not every function or internal component. Use integration tests through the highest practical public entry point, normally incoming Slack events and approval interactions. Exercise real routing, persistence, attachment handling, and adapter logic together; do not add internal unit tests or assertions about method calls.
+V1 is verified by hand. There are no automated test suites and no test files. Every slice in `docs/plan.md` has a manual verification checklist: concrete steps, what to type in Slack or the shell, and the observable result that means pass. A slice is done only when someone has run its checklist against the real system and recorded the result in the plan's status table.
 
-Slack and inference services may be simulated at their external boundaries for repeatable tests. Where enforcement depends on the agent or sandbox, also verify behavior against the real pinned OpenCode runtime and actual isolated environment, using disposable fixtures. A mocked permission event cannot prove that execution is blocked.
+Manual checks go through the public flow: messages, uploads, and button clicks in Slack, against the real pinned OpenCode server. Where enforcement depends on the agent or sandbox, run the check against the real OpenCode 2.0.15 runtime and the actual container, with disposable projects. A Slack prompt or the model's own report cannot prove that an action was blocked. Check the side effect directly, such as a file, a command's output, or a database row.
+
+The spike scripts in `spike/v2` may be used as manual tools, for example to drive a server with the fake model or to dump events. They are not a test suite to maintain.
+
+The manual checks must demonstrate these behaviours:
 
 | Feature | Behavioral acceptance |
 | --- | --- |
@@ -112,7 +121,7 @@ Slack and inference services may be simulated at their external boundaries for r
 | Project isolation | An agent can operate on permitted project data but cannot read an unmounted sibling project, host secrets, or use prohibited host privileges. |
 | OpenCode adapter | The public bridge flow works against the selected OpenCode version for messages, session continuation, and permission decisions. |
 
-Keep tests feature-oriented. Combine related acceptance scenarios where useful; do not create a separate test suite for every internal module. There is no existing code or testing prior art in this project.
+Keep checks feature-oriented. Combine related acceptance scenarios in one checklist where useful. There is no existing code in this project.
 
 ## Out of Scope
 
@@ -124,11 +133,11 @@ Keep tests feature-oriented. Combine related acceptance scenarios where useful; 
 - Concurrent-edit coordination, worktrees per thread, merging, or locking product features. Threads share project files; V1 does not promise conflict-free simultaneous edits.
 - Generated-file delivery back to Slack.
 - Comprehensive support for every attachment format or every provider subscription.
-- An exhaustive test suite for internal implementation details.
+- Automated test suites. Verification is manual, per slice.
 
 ## Further Notes
 
 - This document follows the to-spec structure, with local documentation replacing external issue publication at the owner's request.
 - Requirements are sufficient to start a minimal prototype. Remaining technical choices should be resolved through focused compatibility checks, not another product interview.
-- The project has documentation and dependency setup, not a working bridge. Previously explored VPS installations and disposable bridge work are context, not an existing implementation in this repository.
-- Successful behavior tests establish the tested contract, not proof against every destructive command or sandbox escape.
+- `spike/v2` is a compatibility spike; the bridge implementation is in `bridge/`.
+- Passing manual checks establish the checked contract, not proof against every destructive command or sandbox escape.
