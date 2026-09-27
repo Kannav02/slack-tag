@@ -1,0 +1,16 @@
+[Unit]
+Description=Slack Tag bridge
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/slack-tag/bridge
+EnvironmentFile=/etc/slack-tag/bridge.env
+StateDirectory=slack-tag
+ExecStart=/usr/bin/node --experimental-strip-types --experimental-sqlite src/main.ts
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,46 @@
+Slack Tag local demo — 2026-09-25
+Harness: demo/run.sh against fake Slack (no workspace tokens) and OpenCode Go opencode-go/kimi-k2.7-code.
+
+Startup
+  fake Slack on http://127.0.0.1:3000
+  channel CDEMO (demo) ready
+  bridge connected
+  OpenCode: server listening on http://127.0.0.1:4096
+
+Project after the run (/tmp/slack-tag-demo/project)
+  AGENTS.md
+  facts.txt
+  approved.txt            (0 bytes, created after owner Approve)
+  rejected.txt            ABSENT
+  .slack-tag/inbox/1790375013.000019/blue-square.png   (136 bytes)
+  .git/info/exclude ends with: .slack-tag/
+
+Observed
+  Mention in #demo as owner: "The project codename is HERON." then PINEAPPLE. Bot message edited 1×.
+  Thread reply "Write three short paragraphs about herons." streamed edits 0 → 1 → 2 and ended with PINEAPPLE.
+  touch approved.txt: approval card. Other user Approve → ephemeral "Only the owner can approve or reject actions."
+  Owner Approve → "Approved once by <@UOWNER>", approved.txt appeared, reply "DONE PINEAPPLE".
+  touch rejected.txt: owner Reject → "Rejected by <@UOWNER>", then "The run was interrupted." rejected.txt was not created.
+  blue-square.png + "what colour is this image?": reply "Blue PINEAPPLE". .slack-tag listed in the side panel.
+  Other user "@OpenCode hello" → ephemeral "Only the owner can talk to OpenCode here."
+  Owner in #unmapped "@OpenCode hello" → "This channel is not mapped to a project."
+
+UI state transcript (user, edit count, text). UBOT/UOTHER means an ephemeral visible only to Other user.
+
+2026-09-25T22:23:00.523Z files=AGENTS.md,facts.txt :: UOWNER e0: mention facts.txt
+2026-09-25T22:23:04.968Z UBOT e1: The project codename is **HERON**. PINEAPPLE
+2026-09-25T22:23:08.461Z UOWNER e0: Write three short paragraphs about herons.
+2026-09-25T22:23:10.477Z UBOT e0: Herons are elegant wading birds... (first partial)
+2026-09-25T22:23:11.688Z UBOT e1: ...sinuous necks, and sharp, spear-like bills...
+2026-09-25T22:23:12.494Z UBOT e2: same reply, still growing
+2026-09-25T22:23:17.996Z UBOT e0: *Approval needed:* shell ```touch approved.txt```
+2026-09-25T22:23:20.188Z UBOT/UOTHER e0: Only the owner can approve or reject actions.
+2026-09-25T22:23:22.794Z files=AGENTS.md,approved.txt,facts.txt :: UBOT e1: *Approved once by <@UOWNER>*
+2026-09-25T22:23:26.089Z UBOT e1: DONE PINEAPPLE
+2026-09-25T22:23:28.109Z UBOT e0: *Approval needed:* shell ```touch rejected.txt```
+2026-09-25T22:23:29.560Z UBOT e1: *Rejected by <@UOWNER>* | UBOT e0: The run was interrupted.
+2026-09-25T22:23:33.627Z files=.slack-tag,AGENTS.md,approved.txt,facts.txt :: image message posted
+2026-09-25T22:23:36.052Z UBOT e1: Blue PINEAPPLE
+2026-09-25T22:23:37.889Z UBOT/UOTHER e0: Only the owner can talk to OpenCode here.
+2026-09-25T22:23:39.756Z #unmapped UBOT e0: This channel is not mapped to a project.
+2026-09-25T22:23:43.009Z PASS

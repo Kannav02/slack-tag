@@ -1,0 +1,12 @@
+{
+  "name": "@slack-tag/bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types --experimental-sqlite src/main.ts"
+  },
+  "dependencies": {
+    "@opencode/client": "2.0.15",
+    "@slack/bolt": "4.4.0"
+  }
+}
