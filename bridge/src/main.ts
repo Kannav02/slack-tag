@@ -18,6 +18,9 @@ const botToken = required("SLACK_BOT_TOKEN")
 const appToken = required("SLACK_APP_TOKEN")
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : "unknown error")
 const redact = (text: string) => text.replace(/xox[a-z]-[A-Za-z0-9-]+|xapp-[A-Za-z0-9-]+/g, "[redacted]")
+const redactBlocks = (blocks?: object[]) => blocks?.map((block) =>
+  "text" in block && typeof block.text === "string" ? { ...block, text: redact(block.text) } : block,
+)
 
 const config = loadConfig(configPath)
 const db = openDb(join(dirname(configPath), "slack-tag.sqlite"))
@@ -32,12 +35,12 @@ for (const [id, channel] of Object.entries(config.channels)) {
 const app = new bolt.App({ token: botToken, appToken, socketMode: true, clientOptions: { slackApiUrl: process.env.SLACK_API_URL } })
 const slack: SlackApi = {
   async post(channel, thread_ts, text, blocks) {
-    const posted = await app.client.chat.postMessage({ channel, thread_ts, text: redact(text), blocks: blocks as never })
+    const posted = await app.client.chat.postMessage({ channel, thread_ts, text: redact(text), blocks: redactBlocks(blocks) as never })
     if (!posted.ts) throw new Error("Slack did not return a message ts")
     return posted.ts
   },
   async update(channel, ts, text, blocks) {
-    await app.client.chat.update({ channel, ts, text: redact(text), blocks: blocks as never })
+    await app.client.chat.update({ channel, ts, text: redact(text), blocks: redactBlocks(blocks) as never })
   },
   async ephemeral(channel, user, thread_ts, text) {
     await app.client.chat.postEphemeral({ channel, user, thread_ts, text })

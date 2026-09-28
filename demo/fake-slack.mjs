@@ -142,7 +142,7 @@ async function post(text, thread_ts, input) {
 }
 function view(m) {
   if (m.ephemeralFor && m.ephemeralFor !== me) return ""
-  const blocks = (m.blocks || []).map((b) => b.type === "section" ? "<div>" + md(b.text.text) + "</div>" :
+  const blocks = (m.blocks || []).map((b) => b.type === "markdown" ? "<div>" + md(b.text) + "</div>" : b.type === "section" ? "<div>" + md(b.text.text) + "</div>" :
     "<div>" + b.elements.map((e) => '<button class="' + e.style + '" onclick="click_(\\'' + m.ts + "','" + e.action_id + "')\\">" + esc(e.text.text) + "</button>").join("") + "</div>").join("")
   const body = blocks || "<div>" + md(m.text) + "</div>"
   const files = (m.files || []).map((f) => "<div>📎 " + esc(f.name) + "</div>").join("")
