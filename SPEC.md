@@ -139,6 +139,8 @@ Keep checks feature-oriented. Combine related acceptance scenarios in one checkl
 
 ## Further Notes
 
+- Project onboarding is currently manual: an operator prepares the folder, adds a Compose service and channel configuration, and restarts services. A future guided setup should connect a project without hand-editing Compose or JSON, preserve existing data, and verify server readiness. This is not implemented; see [project mapping and onboarding](docs/project-mapping.md).
+
 - This document follows the to-spec structure, with local documentation replacing external issue publication at the owner's request.
 - Requirements are sufficient to start a minimal prototype. Remaining technical choices should be resolved through focused compatibility checks, not another product interview.
 - `spike/v2` is a compatibility spike; the bridge implementation is in `bridge/`.

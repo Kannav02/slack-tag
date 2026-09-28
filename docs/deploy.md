@@ -2,6 +2,8 @@
 
 Install, update, or roll back Slack Tag on the VPS. The checks to run afterwards are the S6 checklist in `docs/plan.md`.
 
+See [project and session mapping](project-mapping.md) for the current deployment, manual steps to connect another project, and the planned simpler onboarding flow.
+
 Use the production Slack app here, never the dev app used by cloud agents. Socket Mode splits events between every connection that shares an app token.
 
 ## Install
