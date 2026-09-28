@@ -11,9 +11,9 @@
     { "action": "edit", "resource": "*", "effect": "allow" },
     { "action": "write", "resource": "*", "effect": "allow" },
     { "action": "patch", "resource": "*", "effect": "allow" },
-    { "action": "shell", "resource": "*", "effect": "ask" },
-    { "action": "webfetch", "resource": "*", "effect": "ask" },
-    { "action": "websearch", "resource": "*", "effect": "ask" }
+    { "action": "shell", "resource": "*", "effect": "allow" },
+    { "action": "webfetch", "resource": "*", "effect": "allow" },
+    { "action": "websearch", "resource": "*", "effect": "allow" }
   ],
   "experimental": {
     "policies": [

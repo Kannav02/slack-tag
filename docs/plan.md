@@ -1,5 +1,7 @@
 # Slack Tag build plan
 
+Policy update (2026-09-27): policy version 2 automatically allows actions that previously asked for approval. The existing `git push`, `sudo`, and protected-file blocks remain. Rebuild the OpenCode image and restart the bridge together because their policy versions must match. Earlier approval scenarios below document the original implementation, not the current deployment policy.
+
 The shared plan for building Slack Tag V1. The owner starts one cloud agent per slice by pasting the slice's prompt. Each slice ends with a manual verification checklist. A slice is done only when someone has run that checklist against the real system and recorded the result in the status table.
 
 Read `SPEC.md` for requirements and `docs/findings.md` for the evidence behind the design. This file holds the design summary, the decisions, and the slices.
@@ -159,12 +161,11 @@ The starting policy, which S1 turns into config rules and plugin rules:
 | Read, list, and search inside the project | allow |
 | Edit and write inside the project | allow |
 | Edit `.opencode/**`, `opencode.json`, `opencode.jsonc`, `.git/hooks/**`, `.git/config` | deny |
-| Shell, read-only allowlist (`ls`, `cat`, `pwd`, `git status`, `git diff`, `git log`) | allow |
+| Shell commands other than the hard blocks below | allow |
 | Shell `git push *` | deny, hard |
 | Shell `sudo *` | deny |
-| Any other shell command | ask |
-| Web fetch and web search | ask |
-| Anything else | ask |
+| Web fetch and web search | allow |
+| Anything else | allow |
 
 Command-name matching is intent control, not a security boundary. The container is the boundary.
 

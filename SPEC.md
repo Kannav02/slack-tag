@@ -3,6 +3,8 @@
 Status: V1 implementation is integrated; manual owner checks remain in `docs/plan.md`.
 Tracking: local specification only. No external issue tracker or publishing.
 
+Current permission policy (2026-09-27): all actions previously requiring approval now run automatically. Keep the existing hard blocks on `git push`, `sudo`, and edits to protected OpenCode/Git configuration. Container isolation and shell credential stripping remain enabled. This decision supersedes the approval requirements and acceptance checks below; approval handling remains available for older pending requests.
+
 ## Problem Statement
 
 The owner already uses coding agents and pays for inference subscriptions, but wants to work with those agents from Slack instead of switching to a terminal. Existing hosted assistants introduce another product and bill; a custom bridge should connect Slack to the existing agent without becoming a new agent or knowledge platform.

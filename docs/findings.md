@@ -97,11 +97,15 @@ Proposed defaults for questions 1, 3, 5, 6, 7, and 8 are in `docs/plan.md`. They
 
 1. Default Go model per channel, given the 5-hour limits.
 2. Resolved for V1: the Go key sits in the container, and no proxy is used.
-3. Whether the agent may push to git, and with what credential.
+3. Resolved 2026-09-27: keep the existing hard block on `git push`.
 4. Resolved for V1: no outbound allowlist, because there is no egress proxy.
-5. The concrete allow/ask/deny policy, and the approval timeout.
+5. Resolved 2026-09-27: policy version 2 allows all previously approval-gated actions automatically; existing hard blocks remain.
 6. Whether owner replies in a bound thread continue the session without a mention.
 7. `queue` or `steer` for messages sent while the agent is busy.
 8. Fixed Compose containers or containers started on demand by the bridge.
 9. VPS size, whether `/dev/kvm` exists, where project folders live, and whether Docker is installed.
 10. Whether private channels are used.
+
+## Policy version 2 runtime verification (2026-09-27)
+
+Ran the real OpenCode 2.0.15 server on macOS with the updated deployment permissions and safety plugin, a scripted model at the inference boundary, and a disposable project plus local bare Git remote. The plugin RPC reported policy version 2. A shell command wrote the expected file contents, and a subsequent command created a verified Git commit. Neither emitted `permission.asked` or left pending permission requests. `git push origin main` and `sudo touch forbidden.txt` produced tool permission-denial events without prompts; the bare remote remained empty and the forbidden file did not exist. No approval replies were sent. These checks verify server behavior, not live Slack delivery or container isolation; those remain deployment checks.
