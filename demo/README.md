@@ -30,7 +30,9 @@ OPENCODE_API_KEY=<key> OPENCODE_SERVER_PASSWORD=<same password> DEMO_PROJECT=/sr
 | --- | --- |
 | `@OpenCode what is the project codename in facts.txt?` | A thread reply that grows through edits and ends with HERON and PINEAPPLE. |
 | `Write three short paragraphs about herons.` in that thread | A longer streamed reply in the same session. |
-| `@OpenCode use the shell to run exactly: touch approved.txt, then reply DONE` | An approval prompt. Approve as "Other user" gives an ephemeral refusal. Approve as the owner shows "Approved once" and `approved.txt` appears in the side panel. |
-| The same with `rejected.txt`, then Reject | "Rejected", and no file appears. |
+| `@OpenCode use the shell to run exactly: touch approved.txt, then reply DONE` | The command runs automatically under policy version 2; `approved.txt` appears in the side panel. |
+| Ask it to run `sudo touch /tmp/slack-tag-denied` | The hard block rejects the command; independently check that no file was created. |
 | Attach a PNG with `@OpenCode what colour is this image? One word.` | The file lands in `.slack-tag/inbox/<thread>/`, and the model answers. |
 | `@OpenCode` as "Other user", or in `#unmapped` | An ephemeral owner-only refusal, or "not mapped". |
+
+The fake Slack page approximates rendering. Verify Markdown visually in a development Slack workspace before claiming real Slack rendering works.

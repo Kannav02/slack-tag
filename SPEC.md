@@ -1,7 +1,9 @@
 # Slack Bridge: V1
 
-Status: V1 implementation is integrated; manual owner checks remain in `docs/plan.md`.
-Tracking: local specification only. No external issue tracker or publishing.
+Status: owner-only V1 is deployed. Current feature scope is in `docs/backlog.md`; Cloud development instructions are in `docs/cloud-development.md`.
+Tracking: the Slack Tag Notion page and the repository backlog.
+
+This document includes original requirements, not a claim that every feature shipped. Automatic idle shutdown/cold starts remain unimplemented; the build plan is historical.
 
 Current permission policy (2026-09-27): all actions previously requiring approval now run automatically. Keep the existing hard blocks on `git push`, `sudo`, and edits to protected OpenCode/Git configuration. Container isolation and shell credential stripping remain enabled. This decision supersedes the approval requirements and acceptance checks below; approval handling remains available for older pending requests.
 
@@ -100,7 +102,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 
 ## Testing Decisions
 
-V1 is verified by hand. There are no automated test suites and no test files. Every slice in `docs/plan.md` has a manual verification checklist: concrete steps, what to type in Slack or the shell, and the observable result that means pass. A slice is done only when someone has run its checklist against the real system and recorded the result in the plan's status table.
+Run `npm run check` for dependency checks, application typechecking and integration tests through the real bridge entrypoint with simulated external APIs and real SQLite. Keep tests feature-oriented and mock only external boundaries. Real Slack rendering, OpenCode execution and container isolation still require the corresponding runtime checks described in `docs/cloud-development.md`.
 
 Manual checks go through the public flow: messages, uploads, and button clicks in Slack, against the real pinned OpenCode server. Where enforcement depends on the agent or sandbox, run the check against the real OpenCode 2.0.15 runtime and the actual container, with disposable projects. A Slack prompt or the model's own report cannot prove that an action was blocked. Check the side effect directly, such as a file, a command's output, or a database row.
 
@@ -123,7 +125,7 @@ The manual checks must demonstrate these behaviours:
 | Project isolation | An agent can operate on permitted project data but cannot read an unmounted sibling project, host secrets, or use prohibited host privileges. |
 | OpenCode adapter | The public bridge flow works against the selected OpenCode version for messages, session continuation, and permission decisions. |
 
-Keep checks feature-oriented. Combine related acceptance scenarios in one checklist where useful. There is no existing code in this project.
+Keep checks feature-oriented. Combine related acceptance scenarios in one checklist where useful.
 
 ## Out of Scope
 
@@ -135,7 +137,6 @@ Keep checks feature-oriented. Combine related acceptance scenarios in one checkl
 - Concurrent-edit coordination, worktrees per thread, merging, or locking product features. Threads share project files; V1 does not promise conflict-free simultaneous edits.
 - Generated-file delivery back to Slack.
 - Comprehensive support for every attachment format or every provider subscription.
-- Automated test suites. Verification is manual, per slice.
 
 ## Further Notes
 

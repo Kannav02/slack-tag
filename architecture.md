@@ -1,5 +1,7 @@
 # Proposed V1 module interfaces
 
+Historical research: version/runtime details and proposed interfaces below are superseded by the deployed Node/OpenCode 2.0.15 implementation. Read `README.md`, `docs/project-mapping.md`, and `docs/findings.md` for current context.
+
 Status: proposal for agreement, not implemented interfaces.
 
 One bridge process, not a set of microservices. No public HTTP interface is proposed. Bolt connects outbound to Slack through Socket Mode; each project exposes an authenticated OpenCode endpoint only to the bridge. SQLite has no network listener.

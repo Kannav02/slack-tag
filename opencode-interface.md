@@ -1,5 +1,7 @@
 # OpenCode interface reference
 
+Historical research: version/runtime details and proposed interfaces below are superseded by the deployed Node/OpenCode 2.0.15 implementation. Read `README.md`, `docs/project-mapping.md`, and `docs/findings.md` for current context.
+
 Baseline: OpenCode server **2.0.3** and **`@opencode/client@2.0.3`**.
 Bridge runtime: **TypeScript on Bun**, not Node.js.
 Verified: 2026-09-20, through published package declarations and official documentation.
