@@ -32,7 +32,7 @@ for (const [id, channel] of Object.entries(config.channels)) {
   console.log(`channel ${id} (${channel.name}) ${available ? "ready" : "unavailable"}`)
 }
 
-const app = new bolt.App({ token: botToken, appToken, socketMode: true, clientOptions: { slackApiUrl: process.env.SLACK_API_URL } })
+const app = new bolt.App({ token: botToken, appToken, socketMode: true, clientOptions: process.env.SLACK_API_URL ? { slackApiUrl: process.env.SLACK_API_URL } : {} })
 const slack: SlackApi = {
   async post(channel, thread_ts, text, blocks) {
     const posted = await app.client.chat.postMessage({ channel, thread_ts, text: redact(text), blocks: redactBlocks(blocks) as never })
@@ -43,7 +43,7 @@ const slack: SlackApi = {
     await app.client.chat.update({ channel, ts, text: redact(text), blocks: redactBlocks(blocks) as never })
   },
   async ephemeral(channel, user, thread_ts, text) {
-    await app.client.chat.postEphemeral({ channel, user, thread_ts, text })
+    await app.client.chat.postEphemeral({ channel, user, ...(thread_ts === undefined ? {} : { thread_ts }), text })
   },
   download: (url) => fetch(url, { headers: { authorization: `Bearer ${botToken}` } }),
 }
@@ -66,7 +66,7 @@ app.event("message", async ({ event, body }) => {
       userId: m.user,
       text: text.replaceAll(mention, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"),
       ts: m.ts,
-      threadTs: m.thread_ts,
+      ...(m.thread_ts === undefined ? {} : { threadTs: m.thread_ts }),
       mention: text.includes(mention),
       files: m.files ?? [],
     })

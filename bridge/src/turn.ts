@@ -26,7 +26,7 @@ export type Incoming = {
 
 export type Runtime = { channel: Channel; client: Client; available: boolean }
 
-type Run = { sessionId: string; channelId: string; threadTs: string; text: string; parts: string[]; lastEdit: number; timer?: NodeJS.Timeout; retryAt?: number }
+type Run = { sessionId: string; channelId: string; threadTs: string; text: string; parts: string[]; lastEdit: number; timer?: NodeJS.Timeout | undefined; retryAt?: number }
 
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 

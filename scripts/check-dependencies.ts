@@ -1,24 +1,28 @@
 import assert from "node:assert/strict";
-import { Database } from "bun:sqlite";
-import { App, SocketModeReceiver } from "@slack/bolt";
-import { OpenCode } from "@opencode/client";
+import { createRequire } from "node:module";
+import { DatabaseSync } from "node:sqlite";
+import { connect } from "../bridge/src/agent.ts";
+import plugin from "../plugin/index.ts";
 
 // Setup check only: no Slack connection, provider call, or project agent starts.
-assert.equal(Bun.version, "1.4.0", "Use the pinned Bun runtime");
+const bridgeRequire = createRequire(new URL("../bridge/package.json", import.meta.url));
+const { App, SocketModeReceiver } = bridgeRequire("@slack/bolt");
+assert.ok(plugin);
+assert.equal(process.versions.node.split(".")[0], "24", "Use Node 24");
 assert.equal(typeof App, "function");
 assert.equal(typeof SocketModeReceiver, "function");
-const client = OpenCode.make({ baseUrl: "http://127.0.0.1:1" });
+const client = connect("http://127.0.0.1:1", "setup-check");
 assert.equal(typeof client.session.create, "function");
 assert.equal(typeof client.session.prompt, "function");
 assert.equal(typeof client.permission.reply, "function");
 assert.equal(typeof client.event.subscribe, "function");
 
-const db = new Database(":memory:");
+const db = new DatabaseSync(":memory:");
 try {
-  db.run("CREATE TABLE setup_check (value TEXT NOT NULL)");
-  db.run("INSERT INTO setup_check VALUES (?)", ["sqlite-ready"]);
-  assert.deepEqual(db.query("SELECT value FROM setup_check").get(), { value: "sqlite-ready" });
+  db.exec("CREATE TABLE setup_check (value TEXT NOT NULL)");
+  db.prepare("INSERT INTO setup_check VALUES (?)").run("sqlite-ready");
+  assert.equal(db.prepare("SELECT value FROM setup_check").get()?.value, "sqlite-ready");
 } finally {
   db.close();
 }
-console.log("Dependency check passed: Bun, Bolt, OpenCode client imports, and SQLite.");
+console.log("Dependency check passed: Node, deployed Bolt/client/plugin imports, and SQLite.");
