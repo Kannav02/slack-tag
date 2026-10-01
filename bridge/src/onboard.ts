@@ -14,6 +14,8 @@ const exec = promisify(execFile)
 const deploy = fileURLToPath(new URL("../../deploy/", import.meta.url))
 const FOLDER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const READY_MS = 120_000
+// Ports above 1024 that fetch refuses to connect to ("bad port"), so the bridge could never reach a server there.
+const FETCH_BLOCKED = new Set([1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080])
 // Compose would let these shell variables override the project's env file, and Docker never needs the Slack tokens.
 const WITHHELD = /^(SLACK_BOT_TOKEN|SLACK_APP_TOKEN|OPENCODE_SERVER_PASSWORD|SLACK_TAG_(PASSWORD|PORT|PROJECT))$/
 
@@ -125,7 +127,7 @@ export function createOnboarding(config: Config, configPath: string, slack: Slac
       if (other.endsWith(".env")) taken.add(Number(parseEnv(await readFile(join(stateDir, other), "utf8")).SLACK_TAG_PORT))
     }
     let port = config.onboarding!.firstPort ?? 4102
-    while (taken.has(port) || !(await free(port))) port++
+    while (taken.has(port) || FETCH_BLOCKED.has(port) || !(await free(port))) port++
     const password = randomBytes(24).toString("hex")
     await writeFile(file, `SLACK_TAG_PROJECT=${projectDir}\nSLACK_TAG_PORT=${port}\nSLACK_TAG_PASSWORD=${password}\n`, { mode: 0o600 })
     return { port, password }
