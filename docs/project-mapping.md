@@ -13,7 +13,7 @@ flowchart LR
     SB --> FB[Shared project B files]
 ```
 
-Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner replies in it continue the same session without another mention. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. Concurrent edits can therefore conflict; there are no worktrees or file locks per thread.
+Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner replies in it continue the same session without another mention. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. To keep edits from colliding, the bridge runs one prompt at a time per project and queues the rest in arrival order; there are no worktrees per thread.
 
 ## Where the mapping lives
 

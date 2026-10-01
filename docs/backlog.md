@@ -15,11 +15,11 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-7 | Document architecture and trust boundaries | Medium | Planned |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
 | ONB-1 | Add projects through Slack | Medium | Planned |
-| MP-1 | Multiplayer and concurrent-edit isolation | To decide | Research/design |
+| MP-1 | Multiplayer and concurrent-edit isolation | Project queue done; access open | Research/design |
 
 ## Current behavior
 
-The bridge accepts only the configured owner. A mention creates a session; owner replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout. Command dispatch, automated onboarding, worktrees and automatic idle server shutdown are not implemented.
+The bridge accepts only the configured owner. A mention creates a session; owner replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout, and the bridge runs one prompt at a time per project. Command dispatch, automated onboarding, worktrees and automatic idle server shutdown are not implemented.
 
 Policy version 2 allows actions that formerly requested approval. Deployment configuration blocks `git push`; the plugin blocks `sudo` and protected edits. Legacy approval handlers remain. These controls are not a comprehensive security guarantee.
 
@@ -102,7 +102,8 @@ Depends on SEC-3.
 
 - Channel participants should be able to use the agent. Require `@OpenCode` on every agent-directed message, including thread replies; ignore ordinary human conversation.
 - One shared session per thread, with sender attribution. Use queue delivery; defer steering and edited/deleted-message synchronization.
-- Same-session queueing does not protect shared files across sessions. Concurrent edits from different threads are the main unresolved design issue.
+- Decided and implemented: one in-memory queue per project, with each job carrying its thread. Only one prompt runs per project, so threads never edit files concurrently; a waiting message gets a "Queued: N ahead" reply. If a completion event is lost, `session.active()` releases the queue after 60 seconds. `node demo/queue-check.mjs` verifies this against real OpenCode 2.0.15 with a scripted model.
+- Still open: fair turns between threads, persisting the queue across restarts, cancelling queued messages, and parallel worktrees (below) if waiting becomes a problem.
 
 ### Worktrees: proposal, not a final design
 

@@ -28,6 +28,13 @@ export type Runtime = { channel: Channel; client: Client; available: boolean }
 
 type Run = { sessionId: string; channelId: string; threadTs: string; text: string; parts: string[]; lastEdit: number; timer?: NodeJS.Timeout | undefined; retryAt?: number }
 
+// One prompt waiting for its turn. A project runs one prompt at a time so threads never edit files concurrently.
+type Job = { client: Client; sessionId: string; channelId: string; threadTs: string; text: string; files: { uri: string; name: string }[] }
+type Queue = { running?: { sessionId: string; startedAt: number } | undefined; jobs: Job[] }
+
+// A started prompt may not show as active yet; only treat a missing session as finished after this long.
+const STALE_MS = 60_000
+
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 function blocks(summary: string, value?: string) {
@@ -39,6 +46,7 @@ function blocks(summary: string, value?: string) {
 
 export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>) {
   const runs = new Map<string, Run>()
+  const queues = new Map<string, Queue>()
   let chain = Promise.resolve()
   const serial = (task: () => Promise<unknown>) => {
     chain = chain.then(async () => void (await task())).catch((error: unknown) => console.error("bridge task failed:", error instanceof Error ? error.message : "error"))
@@ -88,6 +96,51 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     Object.assign(run, { text: "", parts: [], lastEdit: 0 })
   }
 
+  const queueOf = (projectDir: string) => {
+    if (!queues.has(projectDir)) queues.set(projectDir, { jobs: [] })
+    return queues.get(projectDir)!
+  }
+
+  async function pump(queue: Queue) {
+    while (!queue.running && queue.jobs.length) {
+      const job = queue.jobs.shift()!
+      queue.running = { sessionId: job.sessionId, startedAt: Date.now() }
+      try {
+        await prompt(job.client, job.sessionId, job.text, job.files)
+      } catch (error) {
+        queue.running = undefined
+        await slack.post(job.channelId, job.threadTs, `The request failed: ${error instanceof Error ? error.message : "unknown error"}`).catch(() => undefined)
+      }
+    }
+  }
+
+  function release(sessionId: string) {
+    for (const queue of queues.values()) {
+      if (queue.running?.sessionId !== sessionId) continue
+      queue.running = undefined
+      void pump(queue)
+    }
+  }
+
+  async function enqueue(projectDir: string, job: Job) {
+    const queue = queueOf(projectDir)
+    queue.jobs.push(job)
+    const ahead = queue.jobs.length - 1 + (queue.running ? 1 : 0)
+    if (ahead) await slack.post(job.channelId, job.threadTs, `Queued: ${ahead} ahead of this message in this project.`)
+    await pump(queue)
+  }
+
+  // Recovers from a lost completion event, such as an event stream drop or an OpenCode restart.
+  async function unstick() {
+    for (const [projectDir, queue] of queues) {
+      const running = queue.running
+      if (!running || Date.now() - running.startedAt < STALE_MS) continue
+      const runtime = [...channels.values()].find((r) => r.channel.projectDir === projectDir)
+      const active = runtime && (await runtime.client.session.active().catch(() => undefined))
+      if (active && !(running.sessionId in active) && queue.running === running) release(running.sessionId)
+    }
+  }
+
   async function ask(request: Permission) {
     const known = db.approval(request.id)
     if (known?.message_ts) return
@@ -116,6 +169,9 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
   async function apply(event: AgentEvent) {
     const data = event.data ?? {}
     if (event.type === "permission.asked") return ask(data as Permission)
+    if (event.type.startsWith("session.execution.") && event.type !== "session.execution.started" && typeof data.sessionID === "string") {
+      release(data.sessionID)
+    }
     const run = typeof data.sessionID === "string" ? runOf(data.sessionID) : undefined
     if (!run) return
     switch (event.type) {
@@ -166,7 +222,8 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
       sessionId = await createSession(client, channel.serverDir, channel.model)
       db.addThread({ team_id: m.teamId, channel_id: m.channelId, thread_ts: threadTs, session_id: sessionId })
     }
-    await prompt(client, sessionId, m.text.trim() || "The owner sent the attached files.", files)
+    const text = m.text.trim() || "The owner sent the attached files."
+    await enqueue(channel.projectDir, { client, sessionId, channelId: m.channelId, threadTs, text, files })
   }
 
   async function click(userId: string, decision: "once" | "reject", value: string, channelId: string, threadTs?: string) {
@@ -224,7 +281,10 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     handle,
     click,
     onEvent: (event: AgentEvent) => void serial(() => apply(event)),
-    expire: () => serial(expire),
+    expire: () => serial(async () => {
+      await expire()
+      await unstick()
+    }),
     recover: () => serial(recover),
   }
 }
