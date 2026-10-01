@@ -14,11 +14,14 @@ import { WebSocketServer } from "ws"
 const root = fileURLToPath(new URL("../", import.meta.url))
 
 // Start the production process, replace only external services, and inspect messages plus persisted state.
-test("Slack routing, queued prompts, Markdown replies, and session persistence", { timeout: 30_000 }, async (t) => {
+async function harness(t) {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-integration-"))
   const messages = []
   const sessions = []
   const prompts = []
+  const calls = []
+  const model = (providerID, id, input) => ({ id, modelID: id, providerID, name: id, enabled: true, capabilities: { input } })
+  const models = [model("test", "test", ["text", "image"]), model("test", "text-only", ["text"]), model("other", "x", ["text"])]
   const unexpected = []
   const streams = new Set()
   let child, socket, stream, db
@@ -56,6 +59,17 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
     if (prompt) {
       prompts.push({ sessionID: prompt[1], ...args })
       return json({})
+    }
+    if (path === "/api/model") return json({ data: models })
+    const call = path.match(/^\/api\/session\/([^/]+)(?:\/(command|interrupt|compact|model))?$/)
+    if (call && req.method === "GET" && !call[2]) return json({ data: sessions.find((s) => s.id === call[1]) })
+    if (call?.[2]) {
+      calls.push({ type: call[2], sessionID: call[1], ...args })
+      if (call[2] === "model") sessions.find((s) => s.id === call[1]).model = args.model
+      if (call[2] === "interrupt") return json({ interrupted: true })
+      if (call[2] === "compact") return json({ data: {} })
+      res.writeHead(204)
+      return res.end()
     }
     if (/^\/api\/session\/[^/]+\/permission$/.test(path)) return json({ data: [] })
     if (path === "/api/auth.test") return json({ ok: true, user_id: "UBOT", team_id: "TTEST" })
@@ -139,7 +153,11 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   }))
   await start()
   db = new DatabaseSync(join(work, "slack-tag.sqlite"), { readOnly: true })
+  return { messages, sessions, prompts, calls, unexpected, base, db, until, start, stop, send, emit }
+}
 
+test("Slack routing, queued prompts, Markdown replies, and session persistence", { timeout: 30_000 }, async (t) => {
+  const { messages, sessions, prompts, unexpected, db, until, start, stop, send, emit } = await harness(t)
   send({ ts: "100.1", user: "UOTHER" })
   await until(() => messages.some((m) => m.method === "chat.postEphemeral"))
   assert.equal(messages[0].user, "UOTHER")
@@ -194,4 +212,58 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   assert.equal(prompts[3].text, "continue after restart")
   assert.equal(sessions.length, 2)
   assert.deepEqual(unexpected, [])
+})
+
+test("Slack commands run OpenCode commands and control the thread's session", { timeout: 30_000 }, async (t) => {
+  const h = await harness(t)
+  const reply = async (thread, pattern) => {
+    await h.until(() => h.messages.some((m) => m.thread_ts === thread && pattern.test(m.text)))
+    return h.messages.findLast((m) => m.thread_ts === thread && pattern.test(m.text)).text
+  }
+
+  h.send({ ts: "300.1", text: "<@UBOT> /stop" })
+  await reply("300.1", /No session in this thread yet/)
+  assert.equal(h.sessions.length, 0)
+
+  h.send({ ts: "300.2", text: "<@UBOT> /review branch" })
+  await h.until(() => h.calls.length === 1)
+  const sessionID = h.sessions[0].id
+  assert.deepEqual(h.calls[0], { type: "command", sessionID, name: "review", text: "branch", files: [], delivery: "queue" })
+  h.emit("session.text.delta", sessionID, "Review: looks good")
+  h.emit("session.execution.succeeded", sessionID)
+  await reply("300.2", /^Review: looks good$/)
+
+  h.send({ ts: "300.3", thread_ts: "300.2", text: "<@UBOT> /model" })
+  const list = await reply("300.2", /Available models/)
+  assert.match(list, /Current model:\* `test\/test`/)
+  assert.match(list, /`test\/test` \(images\) \(current\)/)
+  assert.match(list, /`test\/text-only`\n/)
+  assert.doesNotMatch(list, /other\/x/)
+
+  h.send({ ts: "300.4", thread_ts: "300.2", text: "<@UBOT> /model other/x" })
+  await reply("300.2", /`other\/x` is not available/)
+  h.send({ ts: "300.5", thread_ts: "300.2", text: "<@UBOT> /model text-only" })
+  await reply("300.2", /Model set to `test\/text-only` for this thread/)
+  assert.deepEqual(h.calls.filter((c) => c.type === "model").map((c) => c.model), [{ providerID: "test", id: "text-only" }])
+
+  // The switched model cannot read images, so the upload is refused before download.
+  h.send({ ts: "300.6", thread_ts: "300.2", subtype: "file_share", text: "look",
+    files: [{ name: "shot.png", mimetype: "image/png", size: 10, url_private: `${h.base}/files/shot.png` }] })
+  await reply("300.2", /test\/text-only cannot read images/)
+
+  h.send({ ts: "300.7", thread_ts: "300.2", text: "<@UBOT> /stop" })
+  await reply("300.2", /Stopped the current run/)
+  h.send({ ts: "300.8", thread_ts: "300.2", text: "<@UBOT> /compact" })
+  await reply("300.2", /Compaction requested/)
+  assert.deepEqual(h.calls.slice(-2).map((c) => [c.type, c.sessionID]), [["interrupt", sessionID], ["compact", sessionID]])
+
+  h.send({ ts: "300.9", text: "<@UBOT> /model text-only" })
+  await reply("300.9", /Model set to `test\/text-only`/)
+  assert.deepEqual(h.sessions[1].model, { providerID: "test", id: "text-only" })
+
+  h.send({ ts: "300.10", text: "<@UBOT> /tmp/log.txt is empty, why?" })
+  await h.until(() => h.prompts.length === 1)
+  assert.equal(h.prompts[0].text, "/tmp/log.txt is empty, why?")
+  assert.equal(h.calls.filter((c) => c.type === "command").length, 1)
+  assert.deepEqual(h.unexpected, [])
 })

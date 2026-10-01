@@ -13,13 +13,13 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-5 | Keep secrets out of agent reach; isolate projects | High | Research/design |
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Planned |
-| CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
+| CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
 | ONB-1 | Add projects through Slack | Medium | Planned |
 | MP-1 | Multiplayer and concurrent-edit isolation | To decide | Research/design |
 
 ## Current behavior
 
-The bridge accepts only the configured owner. A mention creates a session; owner replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout. Command dispatch, automated onboarding, worktrees and automatic idle server shutdown are not implemented.
+The bridge accepts only the configured owner. A mention creates a session; owner replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout. Automated onboarding, worktrees and automatic idle server shutdown are not implemented.
 
 Policy version 2 allows actions that formerly requested approval. Deployment configuration blocks `git push`; the plugin blocks `sudo` and protected edits. Legacy approval handlers remain. These controls are not a comprehensive security guarantee.
 
@@ -93,7 +93,7 @@ Write a current architecture and trust-boundary document (bridge, containers, pl
 
 ## Feature items
 
-- **CMD-1 Commands:** determine the supported command API on the pinned OpenCode release, map it to Slack, and verify effects in the correct project/session. Command syntax is not selected.
+- **CMD-1 Commands:** a mention whose text starts with `/init`, `/review`, `/model`, `/stop` or `/compact` is a command; any other leading `/` stays a prompt. `/init` and `/review` run OpenCode server commands in the thread's session. `/model` lists enabled models from the channel model's provider and switches only the thread's session; attachments are checked against the session's current model. `/stop` interrupts and `/compact` requests compaction. Verified with integration tests and against real OpenCode 2.0.15 with a scripted model; not yet checked in a development Slack workspace (Slack may reject thread replies starting with `/`, so commands are written after the mention).
 - **ONB-1 Onboarding:** replace manual folder/container/channel mapping (`docs/project-mapping.md`) with a guided Slack flow. Preserve existing data, validate readiness and avoid duplicate setup on retry. Depends on SEC-5 for per-project passwords/networks.
 
 ## MP-1 Multiplayer: agreed direction

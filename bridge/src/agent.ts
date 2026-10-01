@@ -22,10 +22,12 @@ export async function pluginReady(client: Client): Promise<boolean> {
   }
 }
 
-function modelOf(spec: string) {
+export function modelOf(spec: string) {
   const slash = spec.indexOf("/")
   return { providerID: spec.slice(0, slash), id: spec.slice(slash + 1) }
 }
+
+const specOf = (ref: { providerID: string; id: string }) => `${ref.providerID}/${ref.id}`
 
 export async function createSession(client: Client, directory: string, model: string): Promise<string> {
   return (await client.session.create({ title: "slack", location: { directory }, model: modelOf(model) })).id
@@ -37,8 +39,37 @@ export async function inputsOf(client: Client, model: string): Promise<readonly 
   return found?.capabilities.input ?? []
 }
 
+// Enabled models from the same provider as `model`, so the list only offers models the configured key can call.
+export async function modelsOf(client: Client, model: string): Promise<{ spec: string; inputs: readonly string[] }[]> {
+  const { providerID } = modelOf(model)
+  return (await client.model.list()).data
+    .filter((m) => m.providerID === providerID && m.enabled)
+    .map((m) => ({ spec: specOf(m), inputs: m.capabilities.input }))
+}
+
+export async function sessionModel(client: Client, sessionID: string, fallback: string): Promise<string> {
+  const { model } = await client.session.get({ sessionID })
+  return model ? specOf(model) : fallback
+}
+
+export async function switchModel(client: Client, sessionID: string, model: string) {
+  await client.session.switchModel({ sessionID, model: modelOf(model) })
+}
+
 export async function prompt(client: Client, sessionID: string, text: string, files: { uri: string; name: string }[]) {
   await client.session.prompt({ sessionID, text, files, delivery: "queue" })
+}
+
+export async function command(client: Client, sessionID: string, name: string, text: string, files: { uri: string; name: string }[]) {
+  await client.session.command({ sessionID, name, text, files, delivery: "queue" })
+}
+
+export async function interrupt(client: Client, sessionID: string): Promise<boolean> {
+  return (await client.session.interrupt({ sessionID })).interrupted
+}
+
+export async function compact(client: Client, sessionID: string) {
+  await client.session.compact({ sessionID })
 }
 
 export function subscribe(client: Client, onEvent: (event: AgentEvent) => void) {
