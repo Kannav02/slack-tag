@@ -26,7 +26,7 @@ install -d -m 0755 /etc/slack-tag /var/lib/slack-tag
 ```
 
 3. Fill the empty values. The Slack tokens go only in `bridge.env`, and the Go key only in `opencode.env`. Both files get the same `OPENCODE_SERVER_PASSWORD`. Leave the mode at `0600`.
-4. For each channel, run `deploy/prepare-project.sh <project folder>`, give it a service in `deploy/compose.yaml` (copy `beta`), and add it to `/var/lib/slack-tag/config.json` in the shape of `config/example.json`, with `serverDir` set to `/project` and `opencodeUrl` set to the service's host port.
+4. To register projects from Slack, add the `onboarding` section from `config/example.json` and see [project mapping](project-mapping.md). For each channel connected by hand, run `deploy/prepare-project.sh <project folder>`, give it a service in `deploy/compose.yaml` (copy `beta`), and add it to `/var/lib/slack-tag/config.json` in the shape of `config/example.json`, with `serverDir` set to `/project` and `opencodeUrl` set to the service's host port.
 5. Write `deploy/.env` with the Compose variables, for example `ALPHA_PROJECT=/srv/slack-tag/projects/alpha` and `SLACK_TAG_RUNTIME=runsc`. It holds paths only, no secrets. Then start the containers. `restart: unless-stopped` brings them back after a reboot.
 
 ```bash

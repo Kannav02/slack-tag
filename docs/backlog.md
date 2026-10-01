@@ -14,12 +14,12 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Planned |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
-| ONB-1 | Add projects through Slack | Medium | Planned |
+| ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
 | MP-1 | Multiplayer and concurrent-edit isolation | To decide | Research/design |
 
 ## Current behavior
 
-The bridge accepts only the configured owner. A mention creates a session; owner replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout. Command dispatch, automated onboarding, worktrees and automatic idle server shutdown are not implemented.
+The bridge accepts only the configured owner. A mention creates a session; owner replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout. Command dispatch, worktrees and automatic idle server shutdown are not implemented.
 
 Policy version 2 allows actions that formerly requested approval. Deployment configuration blocks `git push`; the plugin blocks `sudo` and protected edits. Legacy approval handlers remain. These controls are not a comprehensive security guarantee.
 
@@ -94,7 +94,7 @@ Write a current architecture and trust-boundary document (bridge, containers, pl
 ## Feature items
 
 - **CMD-1 Commands:** determine the supported command API on the pinned OpenCode release, map it to Slack, and verify effects in the correct project/session. Command syntax is not selected.
-- **ONB-1 Onboarding:** replace manual folder/container/channel mapping (`docs/project-mapping.md`) with a guided Slack flow. Preserve existing data, validate readiness and avoid duplicate setup on retry. Depends on SEC-5 for per-project passwords/networks.
+- **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
 
 ## MP-1 Multiplayer: agreed direction
 

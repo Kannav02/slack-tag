@@ -4,6 +4,7 @@ import { connect, pluginReady, subscribe } from "./agent.ts"
 import type { SlackFile } from "./attachments.ts"
 import { loadConfig } from "./config.ts"
 import { openDb } from "./db.ts"
+import { createOnboarding } from "./onboard.ts"
 import { createRouter, type Runtime, type SlackApi } from "./turn.ts"
 
 function required(name: string): string {
@@ -26,7 +27,7 @@ const config = loadConfig(configPath)
 const db = openDb(join(dirname(configPath), "slack-tag.sqlite"))
 const channels = new Map<string, Runtime>()
 for (const [id, channel] of Object.entries(config.channels)) {
-  const client = connect(channel.opencodeUrl, password)
+  const client = connect(channel.opencodeUrl, channel.password ?? password)
   const available = await pluginReady(client)
   channels.set(id, { channel, client, available })
   console.log(`channel ${id} (${channel.name}) ${available ? "ready" : "unavailable"}`)
@@ -47,7 +48,12 @@ const slack: SlackApi = {
   },
   download: (url) => fetch(url, { headers: { authorization: `Bearer ${botToken}` } }),
 }
-const router = createRouter(config, db, slack, channels)
+const onboarding = createOnboarding(config, configPath, slack, channels, (id, runtime) => {
+  channels.set(id, runtime)
+  subscribe(runtime.client, router.onEvent)
+  console.log(`channel ${id} (${runtime.channel.name}) registered`)
+})
+const router = createRouter(config, db, slack, channels, onboarding.offer)
 const botId = (await app.client.auth.test()).user_id
 const mention = `<@${botId}>`
 
@@ -85,6 +91,15 @@ for (const [actionId, decision] of [["approve", "once"], ["reject", "reject"]] a
       .catch((error: unknown) => console.error("click failed:", redact(messageOf(error))))
   })
 }
+
+app.action("register_folder", async ({ ack, body, action }) => {
+  await ack()
+  const b = body as { user: { id: string }; channel?: { id: string }; message?: { ts: string } }
+  const folder = (action as { selected_option?: { value: string } }).selected_option?.value ?? ""
+  await onboarding
+    .choose(b.user.id, b.channel?.id ?? "", b.message?.ts ?? "", folder)
+    .catch((error: unknown) => console.error("register failed:", redact(messageOf(error))))
+})
 
 await app.start()
 console.log("bridge connected")
