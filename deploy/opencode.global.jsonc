@@ -2,6 +2,8 @@
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,
   "plugins": ["../plugin"],
+  // Model requests go through the key-proxy service, which holds the real Go key.
+  "providers": { "opencode-go": { "settings": { "baseURL": "http://key-proxy:8080/v1" } } },
   "permissions": [
     { "action": "read", "resource": "*", "effect": "allow" },
     { "action": "glob", "resource": "*", "effect": "allow" },

@@ -12,9 +12,25 @@ x-channel: &channel
   mem_limit: 2g
   pids_limit: 512
   env_file: ${OPENCODE_ENV_FILE:-/etc/slack-tag/opencode.env}
+  # OpenCode needs a Go credential to route; the real key lives only in key-proxy.
+  environment: { OPENCODE_API_KEY: unused }
+  depends_on: [key-proxy]
   tmpfs: [/tmp]
 
 services:
+  # Adds the OpenCode Go key to model requests. Not published on the host.
+  key-proxy:
+    image: slack-tag-opencode:2.0.15
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 64
+    env_file: ${PROXY_ENV_FILE:-/etc/slack-tag/proxy.env}
+    command: ["node", "--experimental-strip-types", "/opt/slack-tag/proxy/key-proxy.ts"]
+
   alpha:
     <<: *channel
     build: { context: .., dockerfile: deploy/Dockerfile }

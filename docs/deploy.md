@@ -23,9 +23,12 @@ cd /opt/slack-tag
 install -d -m 0755 /etc/slack-tag /var/lib/slack-tag
 [ -e /etc/slack-tag/bridge.env ] || install -m 0600 -o root -g root deploy/bridge.env.example /etc/slack-tag/bridge.env
 [ -e /etc/slack-tag/opencode.env ] || install -m 0600 -o root -g root deploy/opencode.env.example /etc/slack-tag/opencode.env
+[ -e /etc/slack-tag/proxy.env ] || install -m 0600 -o root -g root deploy/proxy.env.example /etc/slack-tag/proxy.env
 ```
 
-3. Fill the empty values. The Slack tokens go only in `bridge.env`, and the Go key only in `opencode.env`. Both files get the same `OPENCODE_SERVER_PASSWORD`. Leave the mode at `0600`.
+3. Fill the empty values. The Slack tokens go only in `bridge.env`, and the Go key only in `proxy.env`. `bridge.env` and `opencode.env` get the same `OPENCODE_SERVER_PASSWORD`. Leave the mode at `0600`.
+
+   Project containers never receive the Go key. Their OpenCode config sends model requests to the internal `key-proxy` service, which replaces the placeholder credential with the real key and forwards only to `https://opencode.ai/zen/go/v1`.
 4. For each channel, run `deploy/prepare-project.sh <project folder>`, give it a service in `deploy/compose.yaml` (copy `beta`), and add it to `/var/lib/slack-tag/config.json` in the shape of `config/example.json`, with `serverDir` set to `/project` and `opencodeUrl` set to the service's host port.
 5. Write `deploy/.env` with the Compose variables, for example `ALPHA_PROJECT=/srv/slack-tag/projects/alpha` and `SLACK_TAG_RUNTIME=runsc`. It holds paths only, no secrets. Then start the containers. `restart: unless-stopped` brings them back after a reboot.
 
@@ -46,6 +49,7 @@ systemctl enable --now slack-tag
 ## Update
 
 1. In `/opt/slack-tag`, check out the new commit and rerun the two `npm ci` commands.
+   - Upgrading to the key proxy: create `proxy.env` as in install step 2, move `OPENCODE_API_KEY` from `opencode.env` into it, and delete the line from `opencode.env`. Compose overrides any key left in `opencode.env`, but do not keep a second copy.
 2. Rebuild the containers and restart the bridge. Do not replace the env files.
 
 ```bash
