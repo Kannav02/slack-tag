@@ -20,6 +20,7 @@ The checks verify dependencies, typecheck the application, and run integration t
 - [Interactive demo](demo/README.md): fake Slack UI with real OpenCode; requires a development inference key.
 - [VPS deployment](docs/deploy.md): systemd bridge plus Docker Compose project servers.
 - [Project → server → session mapping](docs/project-mapping.md).
+- [Architecture and trust boundaries](docs/trust-boundaries.md): what each component can reach and what is verified.
 - [Verification findings](docs/findings.md): real runtime/Slack evidence and limitations.
 
 ## Feature work

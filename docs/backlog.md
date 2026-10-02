@@ -12,7 +12,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-4 | Bridge runs as a dedicated restricted user | High | Planned (needs VPS) |
 | SEC-5 | Keep secrets out of agent reach; isolate projects | High | Research/design |
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
-| SEC-7 | Document architecture and trust boundaries | Medium | Planned |
+| SEC-7 | Document architecture and trust boundaries | Medium | Done; keep updated |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
 
@@ -89,6 +89,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 ### SEC-7: Document architecture and trust boundaries
 
 Write a current architecture and trust-boundary document (bridge, containers, plugin, secrets, what each component can reach), distinguishing verified enforcement from intent. Update it as SEC items land. `architecture.md` is historical and should not be edited in place.
+
+Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that lands must update its rows there.
 
 ## Feature items
 
