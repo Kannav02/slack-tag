@@ -15,7 +15,6 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-7 | Document architecture and trust boundaries | Medium | Planned |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
-| MP-1 | Multiplayer and concurrent-edit isolation | To decide | Research/design |
 
 ## Current behavior
 
@@ -27,7 +26,7 @@ Policy version 2 allows actions that formerly requested approval. Deployment con
 
 Source: a read-only code audit on 2026-09-29. The VPS was not inspected. "Proven" means reproduced locally; everything else is a finding from code/config that the task must confirm.
 
-Threat model: treat the agent as untrusted. It reads project files, web pages and attachments that may contain injected instructions, and it runs almost every command without approval. Each item asks what a misbehaving agent (or, later, a non-owner Slack user) could reach.
+Threat model: treat the agent as untrusted. It reads project files, web pages and attachments that may contain injected instructions, and it runs almost every command without approval. Each item asks what a misbehaving agent could reach.
 
 ### SEC-1: Attachment writes cannot escape the project
 
@@ -51,7 +50,7 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 
 ### SEC-3: Slack input and output hardening
 
-**Background:** `bridge/src/main.ts` receives Socket Mode events; `turn.ts` checks only `userId === ownerUserId`. This holds for owner-only use, but multiplayer (MP-1) will let other users through.
+**Background:** `bridge/src/main.ts` receives Socket Mode events; `turn.ts` checks only `userId === ownerUserId`. This holds for owner-only use.
 
 **Problem:** no workspace check (`body.team_id ?? ""`); the bot token is sent to whatever `url_private` the event names, following redirects; approval clicks are not checked against the request's channel/thread and `JSON.parse(value)` is unguarded; error text with internal details is posted to Slack; redaction covers Slack tokens only (not the OpenCode key or server password) and skips ephemeral messages and nested block text; agent output can ping `@channel`/`@here`.
 
@@ -95,21 +94,3 @@ Write a current architecture and trust-boundary document (bridge, containers, pl
 
 - **CMD-1 Commands:** determine the supported command API on the pinned OpenCode release, map it to Slack, and verify effects in the correct project/session. Command syntax is not selected.
 - **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
-
-## MP-1 Multiplayer: agreed direction
-
-Depends on SEC-3.
-
-- Channel participants should be able to use the agent. Require `@OpenCode` on every agent-directed message, including thread replies; ignore ordinary human conversation.
-- One shared session per thread, with sender attribution. Use queue delivery; defer steering and edited/deleted-message synchronization.
-- Same-session queueing does not protect shared files across sessions. Concurrent edits from different threads are the main unresolved design issue.
-
-### Worktrees: proposal, not a final design
-
-Investigate an isolated worktree per active thread/task, a cap on executing tasks, shared Git/package caches, and serialized integration with tests. Retire checkouts only after changes and necessary artifacts are preserved; keep conversation/branch identity for follow-ups. Worktrees primarily cost disk; running tooling costs RAM. Measure costs before choosing limits.
-
-The SDK accepts a session location directory, but multiple worktree-backed sessions on one server still need runtime verification. Protected Git mounts assume a normal checkout, so linked-worktree mounts must be redesigned and tested. Worktrees do not automatically isolate external databases, ports or outputs.
-
-Before implementing multiplayer, verify two queued senders, concurrent first messages, Slack retry deduplication, sender/access policy, and two sessions editing the same file in isolated worktrees. Integration must surface merge conflicts and test the combined result.
-
-Sources: [OpenCode 2.0.15 sessions](https://github.com/anomalyco/opencode/blob/v2.0.15/specs/v2/session.md), [Git worktrees](https://git-scm.com/docs/git-worktree), [Cursor worktrees](https://cursor.com/docs/configuration/worktrees), [Claude Code worktrees](https://code.claude.com/docs/en/worktrees), [uv cache](https://docs.astral.sh/uv/concepts/cache/).

@@ -1,6 +1,6 @@
 # Slack Tag
 
-A self-hosted Slack interface to OpenCode: each configured channel selects a project, and each thread has its own persistent agent conversation. The deployed version is owner-only; multiplayer and Slack project onboarding are planned.
+A self-hosted Slack interface to OpenCode: each configured channel selects a project, and each thread has its own persistent agent conversation. The deployed version is owner-only; Slack project onboarding is planned.
 
 ## Development
 
@@ -25,7 +25,7 @@ The checks verify dependencies, typecheck the application, and run integration t
 ## Feature work
 
 - [SPEC.md](SPEC.md): product requirements and implementation boundaries.
-- [Backlog and decisions](docs/backlog.md): security, commands, onboarding, and multiplayer.
+- [Backlog and decisions](docs/backlog.md): security, commands, and onboarding.
 - [Codex Cloud setup](docs/cloud-development.md): setup, verification levels, and Notion access.
 - [Slack Tag in Notion](https://www.notion.so/3e91697f7f2281d988abf6e8d9ed6b78): planning page and work-item database.
 
