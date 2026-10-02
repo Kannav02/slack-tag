@@ -29,7 +29,7 @@ The spike uses historical permission fixtures, not the complete production polic
 
 ## Live development configuration
 
-Supply `SLACK_TAG_CONFIG`, `OPENCODE_SERVER_PASSWORD`, `SLACK_BOT_TOKEN`, and `SLACK_APP_TOKEN` through the environment, then run `npm --prefix bridge start`. Base config on `config/example.json`; use disposable project directories and a development OpenCode server. Provider credentials belong to that server, not committed config.
+Supply `SLACK_TAG_CONFIG`, each channel's server password (under its `passwordEnv` name), `SLACK_BOT_TOKEN`, and `SLACK_APP_TOKEN` through the environment, then run `npm --prefix bridge start`. Base config on `config/example.json`; use disposable project directories and a development OpenCode server. Provider credentials belong to that server, not committed config.
 
 Use a separate Slack app for every concurrently connected test deployment. Never reuse the production app token: Slack distributes events across Socket Mode connections. The fake Slack demo needs no workspace Slack tokens.
 

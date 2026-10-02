@@ -71,7 +71,9 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 
 ### SEC-5: Keep secrets out of agent reach; isolate projects
 
-**Background:** every project container gets `OPENCODE_API_KEY` and the shared `OPENCODE_SERVER_PASSWORD` from one env file. The plugin strips them only from agent shell environments. Containers share the default Compose network and have unrestricted egress. Runtime defaults to `runc` unless `SLACK_TAG_RUNTIME=runsc`.
+**Done (PR #6):** the Go key lives only in the `key-proxy` container; each project has its own server password and Compose network, and the bridge refuses a reused password. Verified with real containers on Docker Desktop, not on the VPS.
+
+**Background:** project containers previously got `OPENCODE_API_KEY` and a shared `OPENCODE_SERVER_PASSWORD` from one env file. The plugin strips them only from agent shell environments. Containers share the default Compose network and have unrestricted egress. Runtime defaults to `runc` unless `SLACK_TAG_RUNTIME=runsc`.
 
 **Problem:** the agent runs as the same uid as the server and can read both secrets from `/proc/1/environ`, then exfiltrate them. With the shared password, one project's agent can drive another project's server. Containers can likely reach the cloud metadata address and host services. `docs/findings.md` already records the `/proc` path as open.
 

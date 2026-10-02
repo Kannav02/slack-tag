@@ -14,11 +14,11 @@ Optional variables: `DEMO_DIR`, `DEMO_PROJECT`, `FAKE_SLACK_PORT` (3000), `OPENC
 
 ## Container OpenCode
 
-Start a channel container as `docs/deploy.md` describes, with the same `OPENCODE_SERVER_PASSWORD` in its env file, then point the demo at it:
+Start a channel container as `docs/deploy.md` describes, with the same `OPENCODE_SERVER_PASSWORD` in its env file (`alpha.env`), then point the demo at it:
 
 ```bash
 deploy/prepare-project.sh /srv/demo/alpha
-ALPHA_PROJECT=/srv/demo/alpha OPENCODE_ENV_FILE=/path/to/opencode.env SLACK_TAG_RUNTIME=runsc \
+ALPHA_PROJECT=/srv/demo/alpha ALPHA_ENV_FILE=/path/to/alpha.env SLACK_TAG_RUNTIME=runsc \
   docker compose -f deploy/compose.yaml up -d --build alpha
 OPENCODE_API_KEY=<key> OPENCODE_SERVER_PASSWORD=<same password> DEMO_PROJECT=/srv/demo/alpha \
   OPENCODE_URL=http://127.0.0.1:4101 SERVER_DIR=/project demo/run.sh

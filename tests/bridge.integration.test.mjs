@@ -111,7 +111,7 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
         SLACK_API_URL: `${base}/api/`,
         SLACK_BOT_TOKEN: "xoxb-test",
         SLACK_APP_TOKEN: "xapp-test",
-        OPENCODE_SERVER_PASSWORD: "test",
+        TEST_SERVER_PASSWORD: "test",
       },
       stdio: ["ignore", "pipe", "pipe"],
     })
@@ -135,7 +135,7 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   base = `http://127.0.0.1:${server.address().port}`
   await writeFile(join(work, "config.json"), JSON.stringify({
     ownerUserId: "UOWNER",
-    channels: { CTEST: { name: "test", projectDir: work, serverDir: "/project", opencodeUrl: base, model: "test/test" } },
+    channels: { CTEST: { name: "test", projectDir: work, serverDir: "/project", opencodeUrl: base, passwordEnv: "TEST_SERVER_PASSWORD", model: "test/test" } },
   }))
   await start()
   db = new DatabaseSync(join(work, "slack-tag.sqlite"), { readOnly: true })
@@ -194,4 +194,50 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   assert.equal(prompts[3].text, "continue after restart")
   assert.equal(sessions.length, 2)
   assert.deepEqual(unexpected, [])
+})
+
+// Two fake OpenCode servers record which password reached them; Slack is never reached.
+test("each channel's server gets its own password, and a reused password stops startup", { timeout: 20_000 }, async (t) => {
+  const work = await mkdtemp(join(tmpdir(), "slack-tag-passwords-"))
+  const seen = { A: [], B: [] }
+  const servers = await Promise.all(Object.keys(seen).map(async (name) => {
+    const server = createServer((req, res) => {
+      seen[name].push(Buffer.from((req.headers.authorization ?? "").replace("Basic ", ""), "base64").toString())
+      res.writeHead(401).end()
+    })
+    server.listen(0, "127.0.0.1")
+    await once(server, "listening")
+    return server
+  }))
+  t.after(async () => {
+    for (const server of servers) server.close()
+    await rm(work, { recursive: true, force: true })
+  })
+  const channel = (name, server) => ({ name, projectDir: work, opencodeUrl: `http://127.0.0.1:${server.address().port}`, passwordEnv: `${name}_PASSWORD`, model: "test/test" })
+  await writeFile(join(work, "config.json"), JSON.stringify({ ownerUserId: "UOWNER", channels: { CA: channel("A", servers[0]), CB: channel("B", servers[1]) } }))
+  async function run(passwords) {
+    const child = spawn(process.execPath, ["--experimental-strip-types", "--experimental-sqlite", join(root, "bridge/src/main.ts")], {
+      cwd: root,
+      env: { PATH: process.env.PATH, HOME: work, SLACK_TAG_CONFIG: join(work, "config.json"), SLACK_API_URL: "http://127.0.0.1:9/api/",
+        SLACK_BOT_TOKEN: "xoxb-test", SLACK_APP_TOKEN: "xapp-test", ...passwords },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let logs = ""
+    child.stdout.on("data", (chunk) => { logs += chunk })
+    child.stderr.on("data", (chunk) => { logs += chunk })
+    const exit = once(child, "exit")
+    for (let i = 0; i < 100 && child.exitCode === null && !logs.includes("channel CB"); i++) await delay(50)
+    child.kill()
+    await exit
+    return logs
+  }
+
+  assert.match(await run({ A_PASSWORD: "alpha-secret", B_PASSWORD: "beta-secret" }), /channel CB \(B\) unavailable/)
+  assert.deepEqual([...new Set(seen.A)], ["opencode:alpha-secret"])
+  assert.deepEqual([...new Set(seen.B)], ["opencode:beta-secret"])
+
+  seen.B.length = 0
+  assert.match(await run({ A_PASSWORD: "same", B_PASSWORD: "same" }), /channel CB reuses another channel's server password/)
+  assert.match(await run({ A_PASSWORD: "only-a" }), /B_PASSWORD is required/)
+  assert.deepEqual(seen.B, [])
 })

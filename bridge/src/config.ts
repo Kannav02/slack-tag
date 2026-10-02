@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 
-export type Channel = { name: string; projectDir: string; serverDir: string; opencodeUrl: string; model: string }
+export type Channel = { name: string; projectDir: string; serverDir: string; opencodeUrl: string; passwordEnv: string; model: string }
 export type Config = { ownerUserId: string; approvalTimeoutMinutes: number; channels: Record<string, Channel> }
 
 export function loadConfig(path: string): Config {
@@ -9,7 +9,7 @@ export function loadConfig(path: string): Config {
   config.approvalTimeoutMinutes ??= 30
   for (const [id, channel] of Object.entries(config.channels)) {
     channel.serverDir ??= channel.projectDir
-    for (const field of ["name", "projectDir", "opencodeUrl", "model"] as const) {
+    for (const field of ["name", "projectDir", "opencodeUrl", "passwordEnv", "model"] as const) {
       if (!channel[field]) throw new Error(`channel ${id} is missing ${field}`)
     }
   }

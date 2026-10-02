@@ -11,7 +11,6 @@ x-channel: &channel
   security_opt: ["no-new-privileges:true"]
   mem_limit: 2g
   pids_limit: 512
-  env_file: ${OPENCODE_ENV_FILE:-/etc/slack-tag/opencode.env}
   # OpenCode needs a Go credential to route; the real key lives only in key-proxy.
   environment: { OPENCODE_API_KEY: unused }
   depends_on: [key-proxy]
@@ -30,10 +29,15 @@ services:
     pids_limit: 64
     env_file: ${PROXY_ENV_FILE:-/etc/slack-tag/proxy.env}
     command: ["node", "--experimental-strip-types", "/opt/slack-tag/proxy/key-proxy.ts"]
+    # Joins every project network; projects cannot reach each other.
+    networks: [alpha, beta]
 
   alpha:
     <<: *channel
     build: { context: .., dockerfile: deploy/Dockerfile }
+    # Holds this server's own OPENCODE_SERVER_PASSWORD.
+    env_file: ${ALPHA_ENV_FILE:-/etc/slack-tag/alpha.env}
+    networks: [alpha]
     ports: ["127.0.0.1:${ALPHA_PORT:-4101}:4096"]
     volumes:
       - ${ALPHA_PROJECT:?set ALPHA_PROJECT}:/project
@@ -44,10 +48,12 @@ services:
       - ${ALPHA_PROJECT}/.git/hooks:/project/.git/hooks:ro
       - ${ALPHA_PROJECT}/.git/config:/project/.git/config:ro
 
-  # Copy this service for each further channel, with its own port, project, and data volume.
+  # Copy this service for each further channel, with its own port, project, env file, network, and data volume.
   beta:
     <<: *channel
     profiles: [extra]
+    env_file: ${BETA_ENV_FILE:-/etc/slack-tag/beta.env}
+    networks: [beta]
     ports: ["127.0.0.1:${BETA_PORT:-4102}:4096"]
     volumes:
       - ${BETA_PROJECT:-/nonexistent}:/project
@@ -61,3 +67,7 @@ services:
 volumes:
   alpha-data:
   beta-data:
+
+networks:
+  alpha:
+  beta:
