@@ -72,6 +72,6 @@ What gets created for a folder `app-one`:
 
 Each registered project's server has its own password, so a project's agent that reads its server password cannot drive another project's server. Existing channels keep the shared `OPENCODE_SERVER_PASSWORD`. The agent can still read its own server's password and the model key (SEC-5).
 
-If a step fails, the message names it; choosing the folder again (or posting `register` again) resumes and reuses the same port and password. To change Docker's runtime for registered projects, set `SLACK_TAG_RUNTIME` (and `OPENCODE_ENV_FILE` if not the default) in `bridge.env`; the bridge passes its environment to `docker compose`, without the Slack tokens or the shared password.
+If a step fails, the message names it; choosing the folder again (or posting `register` again) resumes and reuses the same port and password. To change Docker's runtime or image for registered projects, set `SLACK_TAG_RUNTIME` or `SLACK_TAG_IMAGE` (and `OPENCODE_ENV_FILE` if not the default) in `bridge.env`; the bridge passes its environment to `docker compose`, without the Slack tokens or the shared password.
 
 Not covered: cloning repositories, unregistering a channel, or moving a channel to another folder.

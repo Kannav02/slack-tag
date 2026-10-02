@@ -3,7 +3,7 @@
 # so each project gets its own container, data volume and network. Keep the settings below in step with compose.yaml.
 services:
   opencode:
-    image: slack-tag-opencode:2.0.15
+    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.0.15}
     pull_policy: never
     runtime: ${SLACK_TAG_RUNTIME:-runc}
     restart: unless-stopped
