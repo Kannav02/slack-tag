@@ -4,6 +4,7 @@
 services:
   opencode:
     image: slack-tag-opencode:2.0.15
+    pull_policy: never
     runtime: ${SLACK_TAG_RUNTIME:-runc}
     restart: unless-stopped
     user: "1000:1000"
