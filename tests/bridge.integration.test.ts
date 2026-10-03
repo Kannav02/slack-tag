@@ -431,7 +431,7 @@ await test(
     assert.equal(sessions[0]?.location.directory, "/project");
     assert.deepEqual(sessions[0]?.model, { providerID: "test", id: "test" });
     const sessionID = sessions[0]?.id ?? "";
-    assert.equal(prompts[0]?.text, "start");
+    assert.equal(prompts[0]?.text, "<@UOWNER>: start");
     assert.equal(prompts[0]?.delivery, "queue");
 
     const sample =
@@ -461,7 +461,7 @@ await test(
     // Another member of the mapped channel continues the same session.
     send({ ts: "100.4", thread_ts: "100.3", user: "UOTHER", text: "continue without a mention" });
     await until(() => prompts.length === 2);
-    assert.equal(prompts[1]?.text, "continue without a mention");
+    assert.equal(prompts[1]?.text, "<@UOTHER>: continue without a mention");
     assert.equal(prompts[1]?.sessionID, sessionID);
     assert.equal(prompts[1]?.delivery, "queue");
     assert.equal(sessions.length, 1);
@@ -532,7 +532,7 @@ await test(
     send({ ts: "100.6", thread_ts: "100.3", text: "continue after restart" });
     await until(() => prompts.length === 4);
     assert.equal(prompts[3]?.sessionID, sessionID);
-    assert.equal(prompts[3]?.text, "continue after restart");
+    assert.equal(prompts[3]?.text, "<@UOWNER>: continue after restart");
     assert.equal(sessions.length, 2);
     // Prompts in one project run one at a time, so finish each run before the next prompt.
     emit("session.execution.succeeded", sessionID);
@@ -719,7 +719,7 @@ await test(
 
     h.send({ ts: "300.10", text: "<@UBOT> /tmp/log.txt is empty, why?" });
     await h.until(() => h.prompts.length === 1);
-    assert.equal(h.prompts[0]?.text, "/tmp/log.txt is empty, why?");
+    assert.equal(h.prompts[0]?.text, "<@UOWNER>: /tmp/log.txt is empty, why?");
     assert.equal(h.calls.filter((c) => c.type === "command").length, 1);
 
     // A server command starts a run, so it waits behind the project's running prompt.

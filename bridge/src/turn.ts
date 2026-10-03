@@ -374,7 +374,8 @@ export function createRouter(
     for (const file of m.files) files.push(await store(channel, threadTs, file, slack.download));
 
     const sessionId = thread?.session_id ?? (await start(channel.model));
-    const text = cmd ? cmd.args : m.text.trim() || "The user sent the attached files.";
+    // Several people can share a thread, so the agent sees who sent each prompt. Command arguments stay as typed.
+    const text = cmd ? cmd.args : `<@${m.userId}>: ${m.text.trim() || "sent the attached files."}`;
     await enqueue(channel.projectDir, {
       client,
       sessionId,

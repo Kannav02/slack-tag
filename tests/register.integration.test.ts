@@ -372,12 +372,12 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   mention({ ts: "100.50", text: "<@UBOT> hello" });
   await until(() => prompts.length === 1);
   assert.equal(sessions[0]?.location.directory, "/project");
-  assert.equal(prompts[0]?.text, "hello");
+  assert.equal(prompts[0]?.text, "<@UOWNER>: hello");
   await stop();
   await start();
   mention({ ts: "100.60", text: "<@UBOT> after restart" });
   await until(() => prompts.length === 2);
-  assert.equal(prompts[1]?.text, "after restart");
+  assert.equal(prompts[1]?.text, "<@UOWNER>: after restart");
   assert.match(logs, /channel CNEW \(app-one\) ready/);
   assert.deepEqual(unexpected, []);
 });
