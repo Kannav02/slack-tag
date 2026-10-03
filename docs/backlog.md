@@ -6,16 +6,17 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 
 | ID | Item | Priority | State |
 | --- | --- | --- | --- |
-| SEC-1 | Attachment writes cannot escape the project | High | Planned |
-| SEC-2 | Destructive actions ask the owner and fail closed | High | Planned |
-| SEC-3 | Slack input and output hardening | High | Planned |
-| SEC-4 | Bridge runs as a dedicated restricted user | High | Planned (needs VPS) |
-| SEC-5 | Keep secrets out of agent reach; isolate projects | High | Research/design |
+| SEC-1 | Attachment writes cannot escape the project | High | Done (inbox outside project) |
+| SEC-2 | Destructive actions ask the owner and fail closed | High | Done (policy version 3) |
+| SEC-3 | Slack input and output hardening | High | Done (simulated Slack) |
+| SEC-4 | Bridge runs as a dedicated restricted user | High | Done in repo; VPS apply pending |
+| SEC-5 | Keep secrets out of agent reach; isolate projects | High | Done in PRs, VPS pending |
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Planned |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
 | MP-1 | Multiplayer and concurrent-edit isolation | To decide | Research/design |
+| DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
 
 ## Current behavior
 
@@ -31,6 +32,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 
 ### SEC-1: Attachment writes cannot escape the project
 
+**Done:** uploads go to `<state dir>/inbox/<channel name>/<thread_ts>/`, owned by the bridge and mounted read-only at `/inbox` in the container. The bridge no longer writes into the project or `.git/info/exclude`, refuses a symlinked inbox folder, and refuses a `projectDir` that is `/`, holds, or sits inside the state folder. Verified by integration tests (a symlinked old inbox and `.git/info/exclude` stay untouched) and a Docker Desktop check that `/inbox` is read-only; not yet on the VPS.
+
 **Background:** The bridge runs on the VPS host, not in a container. For owner uploads, `store()` in `bridge/src/attachments.ts` writes into `<projectDir>/.slack-tag/inbox/<thread_ts>/` and appends `.slack-tag/` to `<projectDir>/.git/info/exclude`. The agent's container mounts the same project folder read-write, and `deploy/prepare-project.sh` makes the inbox writable by the container user.
 
 **Problem (proven):** the path check is textual (`resolve` + `startsWith`) and never inspects symlinks. The agent can replace the inbox or the thread folder with a symlink; the next upload is written wherever it points. It can also symlink `.git/info/exclude` to any file (for example `slack-tag.sqlite` or `config.json`), and the bridge appends to it. Writes happen as the bridge's host user (root with the committed unit; `devuser`, uid 1000, on the live VPS).
@@ -40,6 +43,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 **Acceptance:** integration tests through the bridge entrypoint: a symlinked inbox, thread folder or `.git/info/exclude` causes no write outside the project and a visible failure in the thread; normal uploads still work. `npm run check` is sufficient verification.
 
 ### SEC-2: Destructive actions ask the owner and fail closed
+
+**Done:** policy version 3, as listed in `SPEC.md`. Requests whose session has no mapped thread or ancestor are rejected at once. Still open: permission requests from subagent sessions are not re-posted after a bridge restart.
 
 **Background:** `plugin/src/policy.ts` decides every OpenCode permission request. Since 2026-09-27 (`SPEC.md`) it returns `allow` for everything except shell commands starting with `sudo` and edits to protected config paths. `deploy/opencode.global.jsonc` allows shell/edit/webfetch and denies `git push *` by text match. The Slack approval flow (approve-once, owner-only, silence rejects) still exists in `bridge/src/turn.ts`.
 
@@ -51,6 +56,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 
 ### SEC-3: Slack input and output hardening
 
+**Done:** the bridge reads its workspace from `auth.test` and ignores events and clicks from other workspaces; sends the bot token only to `https://files.slack.com` and refuses redirects elsewhere; ignores malformed button values and refuses clicks outside the asking thread; posts a generic failure and logs the details; redacts Slack tokens and every channel server password in posts, updates, ephemerals and nested block text; and neutralises `@channel`, `@here` and `@everyone`. Verified with the simulated Slack server only; how a real Slack app renders the neutralised mentions is not verified. The configurable `teamId` from the scope below was replaced by `auth.test`.
+
 **Background:** `bridge/src/main.ts` receives Socket Mode events; `turn.ts` checks only `userId === ownerUserId`. This holds for owner-only use, but multiplayer (MP-1) will let other users through.
 
 **Problem:** no workspace check (`body.team_id ?? ""`); the bot token is sent to whatever `url_private` the event names, following redirects; approval clicks are not checked against the request's channel/thread and `JSON.parse(value)` is unguarded; error text with internal details is posted to Slack; redaction covers Slack tokens only (not the OpenCode key or server password) and skips ephemeral messages and nested block text; agent output can ping `@channel`/`@here`.
@@ -60,6 +67,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 **Acceptance:** integration tests through the entrypoint with the simulated Slack server. Mention rendering needs a development Slack app check; say so if not done.
 
 ### SEC-4: Bridge runs as a dedicated restricted user
+
+**Done (repo):** `deploy/slack-tag.service` runs as the `slack-tag` system user with systemd sandboxing; `docs/deploy.md` has install and migration steps. Verified in a disposable systemd container, not on the VPS. Applying it needs deployment authorization and must ship with SEC-1.
 
 **Background:** `deploy/slack-tag.service` sets no `User=`, so it runs as root; the live VPS reportedly overrides it to `devuser`, the same uid (1000) as the container user. `docs/deploy.md` creates `/var/lib/slack-tag` world-readable.
 
@@ -72,6 +81,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 ### SEC-5: Keep secrets out of agent reach; isolate projects
 
 **Done (PR #6):** the Go key lives only in the `key-proxy` container; each project has its own server password and Compose network, and the bridge refuses a reused password. Verified with real containers on Docker Desktop, not on the VPS.
+
+**Done (SEC-5 PR), decided 2026-10-02:** agent shells run as `agent` (uid 1001) through `agent-shell`, so they cannot read the server's environment, memory or `/data`, and cannot approve their own permission requests. Project containers run under gVisor by default. `deploy/firewall.sh` blocks the metadata address and the host for project networks; other internet access stays open by decision (no allowlist). Verified on Docker Desktop under runc and under gVisor in Docker-in-Docker, not on the VPS. CPU/disk limits remain open.
 
 **Background:** project containers previously got `OPENCODE_API_KEY` and a shared `OPENCODE_SERVER_PASSWORD` from one env file. The plugin strips them only from agent shell environments. Containers share the default Compose network and have unrestricted egress. Runtime defaults to `runc` unless `SLACK_TAG_RUNTIME=runsc`.
 
@@ -97,6 +108,25 @@ Write a current architecture and trust-boundary document (bridge, containers, pl
 
 - **CMD-1 Commands:** determine the supported command API on the pinned OpenCode release, map it to Slack, and verify effects in the correct project/session. Command syntax is not selected.
 - **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, key proxy, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
+- **DEMO-1 Screenshot demos:** let the agent show that a feature works by driving a headless browser and posting screenshots or short recordings to the Slack thread, and later to the PR. See the proposal below.
+
+## DEMO-1 Screenshot demos: proposal, not a final design
+
+**Goal:** after a change, the agent opens the running app in a headless Chromium, walks through the feature, and the owner sees the screenshots in the thread without opening a terminal.
+
+- **Browser:** a headless Chromium sidecar container per project on the project's own network, following the per-project key-proxy pattern, so the OpenCode image stays small and the browser is separate from the project files. The alternative is Playwright plus Chromium inside the OpenCode image: simpler, but it adds about 400 MB, and Chromium needs `--no-sandbox` and more shared memory in a read-only container.
+- **Agent tools:** Playwright MCP (`@playwright/mcp`) configured in OpenCode and connected to the sidecar over CDP, giving the agent navigate, click, type and screenshot tools.
+- **Output:** the agent writes images to `.slack-tag/outbox/<thread>/`. The bridge, which already holds the Slack token, uploads new files to the thread. The agent receives no Slack or GitHub token; `git push` stays blocked.
+- **PRs (later):** a token-holding component outside the agent (the bridge or a proxy) attaches images to the PR, for example by committing them to a `pr-assets` branch and linking them in the description, using a token scoped to the repo.
+
+Open questions:
+
+- The app under test must be reachable from the sidecar: a dev server started inside the project container, or a public URL. SEC-5 egress limits would need an allowlist for it.
+- Resource cost: Chromium memory per project, and whether the sidecar runs only on demand.
+- The browser can reach whatever the project network can; it must not open pages that can reach the host or the bridge.
+- Record GIFs or short videos as well as stills.
+
+Acceptance: in a registered project, asking the agent to demo a page posts at least one screenshot of the running app in the thread, the agent's container never receives the Slack or GitHub token, and the sidecar cannot reach another project's containers.
 
 ## MP-1 Multiplayer: agreed direction
 

@@ -43,6 +43,8 @@ services:
       - ${SLACK_TAG_PROJECT}/opencode.jsonc:/project/opencode.jsonc:ro
       - ${SLACK_TAG_PROJECT}/.git/hooks:/project/.git/hooks:ro
       - ${SLACK_TAG_PROJECT}/.git/config:/project/.git/config:ro
+      # Slack uploads, written by the bridge; it passes SLACK_TAG_INBOX when it starts the project.
+      - ${SLACK_TAG_INBOX:?set SLACK_TAG_INBOX}:/inbox:ro
 
 volumes:
   data:

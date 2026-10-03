@@ -16,7 +16,9 @@ const root = fileURLToPath(new URL("../", import.meta.url))
 test("registering a project folder from Slack", { timeout: 30_000 }, async (t) => {
   const work = await realpath(await mkdtemp(join(tmpdir(), "slack-tag-register-")))
   const code = join(work, "code")
-  const envFile = join(work, "projects", "app-one.env")
+  // The bridge state folder must stay outside every project, so the config gets its own folder.
+  const state = join(work, "state")
+  const envFile = join(state, "projects", "app-one.env")
   const messages = []
   const sessions = []
   const prompts = []
@@ -52,7 +54,7 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
       res.writeHead(200, { "content-type": "text/event-stream" })
       return res.flushHeaders()
     }
-    if (path === "/api/rpc/slack-tag/status") return json({ output: { pluginVersion: "test", policyVersion: 2 } })
+    if (path === "/api/rpc/slack-tag/status") return json({ output: { pluginVersion: "test", policyVersion: 3 } })
     if (path === "/api/session" && req.method === "POST") {
       sessions.push(args)
       return json({ data: { id: `ses_${sessions.length}` } })
@@ -110,7 +112,7 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
       env: {
         PATH: `${join(work, "bin")}:${process.env.PATH}`,
         HOME: work,
-        SLACK_TAG_CONFIG: join(work, "config.json"),
+        SLACK_TAG_CONFIG: join(state, "config.json"),
         SLACK_API_URL: `${base}/api/`,
         SLACK_BOT_TOKEN: "xoxb-test",
         SLACK_APP_TOKEN: "xapp-test",
@@ -149,7 +151,8 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   await new Promise((resolve) => opencode.listen(0, "127.0.0.1", resolve))
   const port = opencode.address().port
   await new Promise((resolve) => opencode.close(resolve))
-  await writeFile(join(work, "config.json"), JSON.stringify({
+  await mkdir(state)
+  await writeFile(join(state, "config.json"), JSON.stringify({
     ownerUserId: "UOWNER",
     onboarding: { projectsRoot: code, model: "test/test", firstPort: port },
     channels: { CTAKEN: { name: "taken", projectDir: join(code, "taken"), serverDir: "/project", opencodeUrl: "http://127.0.0.1:1", passwordEnv: "TAKEN_SERVER_PASSWORD", model: "test/test" } },
@@ -190,19 +193,21 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   assert.equal(calls[1], `compose -p slack-tag-app-one -f ${join(root, "deploy/project.yaml")} --env-file ${envFile} up -d`)
   const dockerEnv = await readFile(join(work, "docker.env"), "utf8")
   assert.doesNotMatch(dockerEnv, /xoxb-test|xapp-test|taken-secret|TAKEN_SERVER_PASSWORD/)
+  // Uploads go to a bridge-owned inbox that exists before Docker mounts it.
+  assert.match(dockerEnv, new RegExp(`^SLACK_TAG_INBOX=${join(state, "inbox", "app-one")}$`, "m"))
+  assert.ok((await stat(join(state, "inbox", "app-one"))).isDirectory())
   assert.equal((await stat(envFile)).mode & 0o777, 0o600)
   const password = await projectPassword()
   assert.match(password, /^[0-9a-f]{48}$/)
   assert.match(firstEnv, new RegExp(`SLACK_TAG_PROJECT=${join(code, "app-one")}\nSLACK_TAG_PORT=${port}\n`))
-  await stat(join(code, "app-one", ".slack-tag", "inbox"))
   await stat(join(code, "app-one", "opencode.json"))
   await stat(join(code, "app-one", ".git", "config"))
 
-  const saved = JSON.parse(await readFile(join(work, "config.json"), "utf8"))
-  assert.equal((await stat(join(work, "config.json"))).mode & 0o777, 0o600)
+  const saved = JSON.parse(await readFile(join(state, "config.json"), "utf8"))
+  assert.equal((await stat(join(state, "config.json"))).mode & 0o777, 0o600)
   // The channel points at the project's env file; the password itself is stored only there.
   assert.deepEqual(saved.channels.CNEW, { name: "app-one", projectDir: join(code, "app-one"), serverDir: "/project", opencodeUrl: `http://127.0.0.1:${port}`, passwordFile: envFile, model: "test/test" })
-  assert.ok(!(await readFile(join(work, "config.json"), "utf8")).includes(password))
+  assert.ok(!(await readFile(join(state, "config.json"), "utf8")).includes(password))
   assert.ok(saved.channels.CTAKEN)
 
   // The new channel works without a restart, and again after one.

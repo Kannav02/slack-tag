@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { connect, pluginReady } from "./agent.ts"
-import { parseEnv, saveChannel, type Channel, type Config } from "./config.ts"
+import { parseEnv, prepareChannel, saveChannel, type Config, type StoredChannel } from "./config.ts"
 import type { Runtime, SlackApi } from "./turn.ts"
 
 const exec = promisify(execFile)
@@ -32,7 +32,7 @@ const free = (port: number) =>
     probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)))
   })
 
-export function createOnboarding(config: Config, configPath: string, slack: SlackApi, channels: Map<string, Runtime>, add: (id: string, runtime: Runtime) => void) {
+export function createOnboarding(config: Config, configPath: string, slack: SlackApi, channels: Map<string, Runtime>, add: (id: string, runtime: Runtime, password: string) => void) {
   const stateDir = join(dirname(configPath), "projects")
   let chain = Promise.resolve()
 
@@ -78,19 +78,22 @@ export function createOnboarding(config: Config, configPath: string, slack: Slac
     let step = "Preparing the folder"
     try {
       await show(`Registering \`${folder}\`…`)
+      const stored: StoredChannel = { name, projectDir, serverDir: "/project", opencodeUrl: "", passwordFile: join(stateDir, `${name}.env`), model: config.onboarding!.model }
       await exec("sh", [join(deploy, "prepare-project.sh"), projectDir])
       await show("✅ Folder prepared")
 
       step = "Starting the container"
       const { port, password } = await envFor(name, projectDir)
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => PASSED.test(key)))
-      const file = join(stateDir, `${name}.env`)
-      await exec("docker", ["compose", "-p", `slack-tag-${name}`, "-f", join(deploy, "project.yaml"), "--env-file", file, "up", "-d"], { env })
+      stored.opencodeUrl = `http://127.0.0.1:${port}`
+      const channel = prepareChannel(configPath, channelId, stored)
+      // Create the inbox before Docker would create the mount point as root.
+      await mkdir(channel.inboxDir, { recursive: true, mode: 0o755 })
+      const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => PASSED.test(key))), SLACK_TAG_INBOX: channel.inboxDir }
+      await exec("docker", ["compose", "-p", `slack-tag-${name}`, "-f", join(deploy, "project.yaml"), "--env-file", stored.passwordFile!, "up", "-d"], { env })
       await show(`✅ Container \`slack-tag-${name}\` started on port ${port}`)
 
       step = "Waiting for OpenCode"
-      const opencodeUrl = `http://127.0.0.1:${port}`
-      const client = connect(opencodeUrl, password)
+      const client = connect(channel.opencodeUrl, password)
       const deadline = Date.now() + READY_MS
       while (!(await pluginReady(client))) {
         if (Date.now() > deadline) throw new Error("the server did not answer with the safety plugin in time")
@@ -99,10 +102,9 @@ export function createOnboarding(config: Config, configPath: string, slack: Slac
       await show("✅ OpenCode answered with the safety plugin")
 
       step = "Saving the channel"
-      const channel: Channel = { name, projectDir, serverDir: "/project", opencodeUrl, passwordFile: file, model: config.onboarding!.model }
-      saveChannel(configPath, channelId, channel)
+      saveChannel(configPath, channelId, stored)
       config.channels[channelId] = channel
-      add(channelId, { channel, client, available: true })
+      add(channelId, { channel, client, available: true }, password)
       await show("✅ Connected. Mention me in this channel to start.")
     } catch (error) {
       await show(`❌ ${step} failed: ${messageOf(error)}\nMention me with \`register\` to try again.`)
