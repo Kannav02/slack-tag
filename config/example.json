@@ -12,6 +12,7 @@
       "projectDir": "/srv/slack-tag/projects/alpha",
       "serverDir": "/project",
       "opencodeUrl": "http://127.0.0.1:4101",
+      "passwordEnv": "ALPHA_SERVER_PASSWORD",
       "model": "opencode-go/kimi-k2.7-code"
     }
   }
