@@ -6,7 +6,7 @@ type Setup = Parameters<typeof plugin.setup>[0]
 type PermissionInput = { sessionID: string; action: string; resources: unknown[]; effect: string }
 
 // Load the plugin as OpenCode does and call its permission hook with representative requests.
-test("permission hook allows safe work, asks for the rest, and denies push, sudo and download-and-run", async () => {
+await test("permission hook allows safe work, asks for the rest, and denies push, sudo and download-and-run", async () => {
   const hooks = new Map<string, (input: PermissionInput) => void>()
   // Only the parts of OpenCode's plugin host that the plugin uses.
   const host = {

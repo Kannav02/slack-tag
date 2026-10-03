@@ -252,9 +252,9 @@ async function harness(t: TestContext) {
   }
 }
 
-test("Slack routing, queued prompts, Markdown replies, approvals, and session persistence", { timeout: 60_000 }, async (t) => {
+await test("Slack routing, queued prompts, Markdown replies, approvals, and session persistence", { timeout: 60_000 }, async (t) => {
   const {
-    state, project, outside, base, db, messages, sessions, prompts, replies, fetched, unexpected,
+    state, outside, base, db, messages, sessions, prompts, replies, fetched, unexpected,
     logs, until, start, stop, send, emit, click, rawClick, permission, prompted,
   } = await harness(t)
   send({ ts: "100.1", user: "UOTHER" })
@@ -335,7 +335,7 @@ test("Slack routing, queued prompts, Markdown replies, approvals, and session pe
   await until(() => messages.some((m) => m.method === "chat.update" && /nobody answered in time/.test(m.text ?? "")))
 
   send({ ts: "100.5" })
-  await until(() => messages.some((m) => m.thread_ts === "100.5" && /^Queued: 1 ahead/.test(m.text ?? "")))
+  await until(() => messages.some((m) => m.thread_ts === "100.5" && (m.text ?? "").startsWith("Queued: 1 ahead")))
   assert.equal(prompts.length, 2)
   emit("session.execution.succeeded", sessionID)
   await until(() => prompts.length === 3)
@@ -417,7 +417,7 @@ test("Slack routing, queued prompts, Markdown replies, approvals, and session pe
   assert.deepEqual(unexpected, [])
 })
 
-test("Slack commands run OpenCode commands and control the thread's session", { timeout: 30_000 }, async (t) => {
+await test("Slack commands run OpenCode commands and control the thread's session", { timeout: 30_000 }, async (t) => {
   const h = await harness(t)
   const reply = async (thread: string, pattern: RegExp) => {
     const matches = (m: Message) => m.thread_ts === thread && pattern.test(m.text ?? "")
@@ -481,7 +481,7 @@ test("Slack commands run OpenCode commands and control the thread's session", { 
 })
 
 // Two fake OpenCode servers record which password reached them; Slack is never reached.
-test("each channel's server gets its own password, and a reused password stops startup", { timeout: 20_000 }, async (t) => {
+await test("each channel's server gets its own password, and a reused password stops startup", { timeout: 20_000 }, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-passwords-"))
   const seen: Record<"A" | "B", string[]> = { A: [], B: [] }
   const servers = await Promise.all((["A", "B"] as const).map(async (name) => {
@@ -527,7 +527,7 @@ test("each channel's server gets its own password, and a reused password stops s
   assert.deepEqual(seen.B, [])
 })
 
-test("a project folder that is /, holds, or sits inside the bridge state folder stops startup", { timeout: 20_000 }, async (t) => {
+await test("a project folder that is /, holds, or sits inside the bridge state folder stops startup", { timeout: 20_000 }, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-projectdir-"))
   const state = join(work, "state")
   await mkdir(state)
