@@ -9,7 +9,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-1 | Attachment writes cannot escape the project | High | Planned |
 | SEC-2 | Destructive actions ask the owner and fail closed | High | Planned |
 | SEC-3 | Slack input and output hardening | High | Planned |
-| SEC-4 | Bridge runs as a dedicated restricted user | High | Planned (needs VPS) |
+| SEC-4 | Bridge runs as a dedicated restricted user | High | Done in repo; VPS apply pending |
 | SEC-5 | Keep secrets out of agent reach; isolate projects | High | Research/design |
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Planned |
@@ -60,6 +60,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 **Acceptance:** integration tests through the entrypoint with the simulated Slack server. Mention rendering needs a development Slack app check; say so if not done.
 
 ### SEC-4: Bridge runs as a dedicated restricted user
+
+**Done (repo):** `deploy/slack-tag.service` runs as the `slack-tag` system user with systemd sandboxing; `docs/deploy.md` has install and migration steps. Verified in a disposable systemd container, not on the VPS. Applying it needs deployment authorization and must ship with SEC-1.
 
 **Background:** `deploy/slack-tag.service` sets no `User=`, so it runs as root; the live VPS reportedly overrides it to `devuser`, the same uid (1000) as the container user. `docs/deploy.md` creates `/var/lib/slack-tag` world-readable.
 
