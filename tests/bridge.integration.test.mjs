@@ -14,14 +14,14 @@ import { WebSocketServer } from "ws"
 const root = fileURLToPath(new URL("../", import.meta.url))
 
 // Start the production process, replace only external services, and inspect messages plus persisted state.
-test("Slack routing, queued prompts, Markdown replies, and session persistence", { timeout: 30_000 }, async (t) => {
+test("Slack routing, queued prompts, Markdown replies, approvals, and session persistence", { timeout: 60_000 }, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-integration-"))
   const messages = []
   const sessions = []
   const prompts = []
   const unexpected = []
+  const replies = []
   const fetched = []
-  const decisions = []
   const streams = new Set()
   let child, socket, stream, db
   let logs = ""
@@ -51,14 +51,9 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
     if (path.startsWith("/files/") || path === "/steal") fetched.push({ path, authorization: req.headers.authorization })
     if (path === "/files/ok.txt") return res.end("ok")
     if (path === "/files/redirect") return res.writeHead(302, { location: `${base.replace("127.0.0.1", "localhost")}/steal` }).end()
-    if (path === "/api/model") return json({ data: [{ providerID: "test", id: "test", capabilities: { input: ["text"] } }] })
-    if (/\/permission\/[^/]+/.test(path)) {
-      decisions.push({ path, ...args })
-      return json({})
-    }
-    if (path === "/api/rpc/slack-tag/status") return json({ output: { pluginVersion: "test", policyVersion: 2 } })
-    if (path === "/api/model") return json({ data: [{ providerID: "test", id: "test", capabilities: { input: ["text"] } }] })
     if (path === "/files/note.txt") return res.end("uploaded note")
+    if (path === "/api/rpc/slack-tag/status") return json({ output: { pluginVersion: "test", policyVersion: 3 } })
+    if (path === "/api/model") return json({ data: [{ providerID: "test", id: "test", capabilities: { input: ["text"] } }] })
     if (path === "/api/session" && req.method === "POST") {
       const id = `ses_test${sessions.length + 1}`
       sessions.push({ id, ...args })
@@ -70,6 +65,14 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
       return json({})
     }
     if (/^\/api\/session\/[^/]+\/permission$/.test(path)) return json({ data: [] })
+    const reply = path.match(/^\/api\/session\/([^/]+)\/permission\/([^/]+)\/reply$/)
+    if (reply) {
+      replies.push({ sessionID: reply[1], requestID: reply[2], ...args })
+      return res.writeHead(204).end()
+    }
+    // ses_child is a subagent of the first Slack session; ses_orphan has no mapped ancestor.
+    const info = path.match(/^\/api\/session\/(ses_child|ses_orphan)$/)
+    if (info) return json({ data: { id: info[1], ...(info[1] === "ses_child" ? { parentID: sessions[0].id } : {}) } })
     if (path === "/api/auth.test") return json({ ok: true, user_id: "UBOT", team_id: "TTEST" })
     if (path === "/api/apps.connections.open") return json({ ok: true, url: `${base.replace("http:", "ws:")}/socket` })
     if (["/api/chat.postMessage", "/api/chat.update", "/api/chat.postEphemeral"].includes(path)) {
@@ -140,10 +143,25 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
         event: { type: "message", channel: "CTEST", user: "UOWNER", text: "<@UBOT> start", ...event } },
     }))
   }
+  function click(actionId, user, message) {
+    const id = `click-${++sequence}`
+    const value = message.blocks[1].elements[0].value
+    socket.send(JSON.stringify({
+      envelope_id: id, type: "interactive", accepts_response_payload: false,
+      payload: { type: "block_actions", team: { id: "TTEST" }, api_app_id: "ATEST", token: "t", trigger_id: id, user: { id: user },
+        channel: { id: "CTEST" }, container: { type: "message", message_ts: message.ts }, message: { ts: message.ts, thread_ts: message.thread_ts },
+        actions: [{ type: "button", action_id: actionId, block_id: "b", value, action_ts: "1" }] },
+    }))
+  }
+  function permission(id, sessionID, command) {
+    stream.write(`data: ${JSON.stringify({ type: "permission.asked", data: { id, sessionID, action: "shell", resources: [command] } })}\n\n`)
+  }
+  const prompted = (id) => messages.find((m) => m.method === "chat.postMessage" && m.blocks?.[1]?.elements?.[0]?.value.includes(id))
   function emit(type, sessionID, delta, data = { sessionID, delta }) {
     stream.write(`data: ${JSON.stringify({ type, data })}\n\n`)
   }
-  function click(value, { team = "TTEST", thread = "100.3" } = {}) {
+  // A click with any button value, workspace and thread, for the malformed and misdirected cases.
+  function rawClick(value, { team = "TTEST", thread = "100.3" } = {}) {
     socket.send(JSON.stringify({
       envelope_id: `click-${++sequence}`, type: "interactive", accepts_response_payload: false,
       payload: { type: "block_actions", team: { id: team }, user: { id: "UOWNER" }, api_app_id: "ATEST", token: "t", trigger_id: "t",
@@ -167,6 +185,7 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   await symlink(join(outside, "victim.txt"), join(project, ".git", "info", "exclude"))
   await writeFile(join(state, "config.json"), JSON.stringify({
     ownerUserId: "UOWNER",
+    approvalTimeoutMinutes: 0.001,
     channels: { CTEST: { name: "test", projectDir: project, serverDir: "/project", opencodeUrl: base, passwordEnv: "TEST_SERVER_PASSWORD", model: "test/test" } },
   }))
   await start()
@@ -213,6 +232,40 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   assert.equal(prompts[1].sessionID, sessionID)
   assert.equal(prompts[1].delivery, "queue")
   assert.equal(sessions.length, 1)
+
+  // Approve once: another user's click is refused, the owner's click replies "once".
+  permission("per_approve", sessionID, "rm -rf build")
+  await until(() => prompted("per_approve"))
+  assert.equal(prompted("per_approve").thread_ts, "100.3")
+  click("approve", "UOTHER", prompted("per_approve"))
+  await until(() => messages.some((m) => m.method === "chat.postEphemeral" && /Only the owner can approve/.test(m.text)))
+  assert.equal(replies.length, 0)
+  click("approve", "UOWNER", prompted("per_approve"))
+  await until(() => replies.length === 1)
+  assert.deepEqual(replies[0], { sessionID, requestID: "per_approve", decision: "once" })
+  await until(() => messages.some((m) => m.method === "chat.update" && /Approved once/.test(m.text)))
+
+  permission("per_reject", sessionID, "git reset --hard")
+  await until(() => prompted("per_reject"))
+  click("reject", "UOWNER", prompted("per_reject"))
+  await until(() => replies.length === 2)
+  assert.deepEqual(replies[1], { sessionID, requestID: "per_reject", decision: "reject" })
+
+  // A request without any mapped thread is refused at once; a subagent's request reaches its parent's thread.
+  permission("per_orphan", "ses_orphan", "rm -rf /")
+  await until(() => replies.length === 3)
+  assert.deepEqual(replies[2], { sessionID: "ses_orphan", requestID: "per_orphan", decision: "reject" })
+  assert.equal(prompted("per_orphan"), undefined)
+  permission("per_child", "ses_child", "rm -rf src")
+  await until(() => prompted("per_child"))
+  assert.equal(prompted("per_child").thread_ts, "100.3")
+
+  // Nobody answers: the bridge's 15-second expiry sweep rejects it.
+  const deadline = Date.now() + 20_000
+  while (replies.length < 4 && Date.now() < deadline) await delay(100)
+  assert.deepEqual(replies[3], { sessionID: "ses_child", requestID: "per_child", decision: "reject" })
+  await until(() => messages.some((m) => m.method === "chat.update" && /nobody answered in time/.test(m.text)))
+
   send({ ts: "100.5" })
   await until(() => prompts.length === 3)
   assert.notEqual(prompts[2].sessionID, sessionID)
@@ -261,18 +314,18 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
 
   // Approval clicks must be well formed, from this workspace, and in the asking thread.
   emit("permission.asked", sessionID, undefined, { id: "per_1", sessionID, action: "shell", resources: ["rm -rf x"] })
-  await until(() => messages.some((m) => m.blocks?.[1]?.elements))
-  const value = messages.find((m) => m.blocks?.[1]?.elements).blocks[1].elements[0].value
-  click("{oops")
-  click(value, { team: "TOTHER" })
-  click(value, { thread: "100.5" })
+  await until(() => prompted("per_1"))
+  const value = prompted("per_1").blocks[1].elements[0].value
+  rawClick("{oops")
+  rawClick(value, { team: "TOTHER" })
+  rawClick(value, { thread: "100.5" })
   await until(() => messages.some((m) => m.text === "This button does not belong to this thread."))
   await delay(200)
-  assert.deepEqual(decisions, [])
+  assert.equal(replies.length, 4)
   assert.match(logs, /click ignored: malformed button value/)
-  click(value)
-  await until(() => decisions.length === 1)
-  assert.match(decisions[0].path, /per_1/)
+  rawClick(value)
+  await until(() => replies.length === 5)
+  assert.deepEqual(replies[4], { sessionID, requestID: "per_1", decision: "once" })
   assert.ok(!JSON.stringify(messages).includes("synthetic-secret"))
 
   // Uploads land in the bridge-owned inbox, not through the agent's symlinks.

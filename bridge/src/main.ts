@@ -79,7 +79,7 @@ const botId = auth.user_id
 const teamId = auth.team_id
 const mention = `<@${botId}>`
 
-for (const { client } of channels.values()) subscribe(client, router.onEvent)
+for (const { client } of channels.values()) subscribe(client, (event) => router.onEvent(event, client))
 await router.recover()
 setInterval(() => void router.expire(), 15_000)
 

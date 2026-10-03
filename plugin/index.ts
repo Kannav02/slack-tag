@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { decide, stripSecrets } from "./src/policy.ts"
+import { safeDecide, stripSecrets } from "./src/policy.ts"
 import { definition, status } from "./src/rpc.ts"
 
 export default Plugin.define({
@@ -9,7 +9,7 @@ export default Plugin.define({
       status: async () => status(),
     })
     await ctx.permission.hook("evaluate", (input) => {
-      const decision = decide(input.action, input.resources)
+      const decision = safeDecide(input.action, input.resources)
       input.effect = decision.effect
       if (decision.message) input.message = decision.message
     })

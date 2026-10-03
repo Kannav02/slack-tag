@@ -7,7 +7,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | ID | Item | Priority | State |
 | --- | --- | --- | --- |
 | SEC-1 | Attachment writes cannot escape the project | High | Done (inbox outside project) |
-| SEC-2 | Destructive actions ask the owner and fail closed | High | Planned |
+| SEC-2 | Destructive actions ask the owner and fail closed | High | Done (policy version 3) |
 | SEC-3 | Slack input and output hardening | High | Done (simulated Slack) |
 | SEC-4 | Bridge runs as a dedicated restricted user | High | Planned (needs VPS) |
 | SEC-5 | Keep secrets out of agent reach; isolate projects | High | Research/design |
@@ -42,6 +42,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 **Acceptance:** integration tests through the bridge entrypoint: a symlinked inbox, thread folder or `.git/info/exclude` causes no write outside the project and a visible failure in the thread; normal uploads still work. `npm run check` is sufficient verification.
 
 ### SEC-2: Destructive actions ask the owner and fail closed
+
+**Done:** policy version 3, as listed in `SPEC.md`. Requests whose session has no mapped thread or ancestor are rejected at once. Still open: permission requests from subagent sessions are not re-posted after a bridge restart.
 
 **Background:** `plugin/src/policy.ts` decides every OpenCode permission request. Since 2026-09-27 (`SPEC.md`) it returns `allow` for everything except shell commands starting with `sudo` and edits to protected config paths. `deploy/opencode.global.jsonc` allows shell/edit/webfetch and denies `git push *` by text match. The Slack approval flow (approve-once, owner-only, silence rejects) still exists in `bridge/src/turn.ts`.
 
