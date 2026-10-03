@@ -15,6 +15,10 @@ Record these commands in environment setup, review the results, and publish only
 
 [Official setup documentation](https://learn.chatgpt.com/docs/environments/cloud-environments) covers repository selection, installation, networking and publishing. Legacy Cloud environments have a different settings interface; use the same install/check commands there.
 
+## Claude Code cloud sessions
+
+`.claude/hooks/session-start.sh` runs on every Claude Code cloud session start: it installs Node from `.node-version` with nvm (the image ships Node 22), puts it on the session `PATH`, installs the root, `bridge/` and `plugin/` packages, and runs `npm run check:dependencies`. It does nothing outside cloud sessions. The environment's network policy must allow the npm registry and nodejs.org.
+
 ## Verification levels
 
 | Check | What it establishes | Requirements |
