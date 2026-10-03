@@ -55,7 +55,7 @@ const router = createRouter(config, db, slack, channels)
 const botId = (await app.client.auth.test()).user_id
 const mention = `<@${botId}>`
 
-for (const { client } of channels.values()) subscribe(client, router.onEvent)
+for (const { client } of channels.values()) subscribe(client, (event) => router.onEvent(event, client))
 await router.recover()
 setInterval(() => void router.expire(), 15_000)
 
