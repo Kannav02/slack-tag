@@ -152,6 +152,9 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   const port = opencode.address().port
   await new Promise((resolve) => opencode.close(resolve))
   await mkdir(state)
+  // An earlier registration already uses network 1.
+  await mkdir(join(state, "projects"))
+  await writeFile(join(state, "projects", "older.env"), `SLACK_TAG_PROJECT=${join(work, "older")}\nSLACK_TAG_PORT=1\nSLACK_TAG_PASSWORD=older\nSLACK_TAG_NET=1\n`)
   await writeFile(join(state, "config.json"), JSON.stringify({
     ownerUserId: "UOWNER",
     onboarding: { projectsRoot: code, model: "test/test", firstPort: port },
@@ -200,6 +203,8 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   const password = await projectPassword()
   assert.match(password, /^[0-9a-f]{48}$/)
   assert.match(firstEnv, new RegExp(`SLACK_TAG_PROJECT=${join(code, "app-one")}\nSLACK_TAG_PORT=${port}\n`))
+  // Its own network (subnet and st- bridge in project.yaml), skipping the one already in use.
+  assert.match(firstEnv, /^SLACK_TAG_NET=2$/m)
   await stat(join(code, "app-one", "opencode.json"))
   await stat(join(code, "app-one", ".git", "config"))
 
