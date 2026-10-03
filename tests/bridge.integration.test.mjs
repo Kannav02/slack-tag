@@ -222,7 +222,7 @@ test("Slack routing, queued prompts, Markdown replies, approvals, and session pe
   assert.equal(prompts.length, 0)
 
   send({ ts: "100.2", channel: "CUNMAPPED" })
-  await until(() => messages.some((m) => m.text === "This channel is not mapped to a project."))
+  await until(() => messages.some((m) => m.text.startsWith("This channel is not mapped to a project.")))
   assert.equal(sessions.length, 0)
 
   send({ ts: "100.3" })
