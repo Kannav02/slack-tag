@@ -5,12 +5,44 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Own system user, not uid 1000 (the container user). Create it first; see docs/deploy.md.
+User=slack-tag
+Group=slack-tag
 WorkingDirectory=/opt/slack-tag/bridge
+# systemd reads this as root, so it stays root-only (0600) and the bridge cannot reread it.
 EnvironmentFile=/etc/slack-tag/bridge.env
 StateDirectory=slack-tag
+StateDirectoryMode=0700
+# Group bits stay so the attachment inbox can be shared with the container group (uid 1000).
+UMask=0027
 ExecStart=/usr/bin/node --experimental-strip-types --experimental-sqlite src/main.ts
 Restart=on-failure
 RestartSec=5
+
+# Only /var/lib/slack-tag is writable; home folders and projects are hidden.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/slack-tag
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
 
 [Install]
 WantedBy=multi-user.target
