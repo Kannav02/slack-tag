@@ -1,19 +1,20 @@
 # Architecture and trust boundaries
 
-Current snapshot: 2026-10-02, covering `main` plus Slack project registration (ONB-1). This document replaces `architecture.md` as the current picture; that file is historical. Update this file whenever a SEC item in [the backlog](backlog.md) lands.
+Current snapshot: 2026-10-03, covering `main` after SEC-1 to SEC-5, Slack project registration (ONB-1, with SEC-5 isolation for registered projects), Slack commands (CMD-1) and the per-project queue. This document replaces `architecture.md` as the current picture; that file is historical. Update this file whenever a SEC item in [the backlog](backlog.md) lands.
 
-Threat model: the agent is untrusted. It reads project files, web pages and attachments that may carry injected instructions, and it runs almost every command without approval. The questions here are what each component can reach and what actually stops it.
+Threat model: the agent is untrusted. It reads project files, web pages and attachments that may carry injected instructions, and it runs commands on its own. The questions here are what each component can reach and what actually stops it.
+
+None of the SEC-1 to SEC-5 changes has been applied to the VPS yet. Applying them needs deployment authorization; until then the VPS runs the earlier setup described in [findings](findings.md).
 
 ## Evidence labels
 
 Every claim about enforcement carries one label:
 
 - **Live**: checked on the VPS with real Slack (see [findings](findings.md), first live deployment).
-- **Real**: checked against real OpenCode 2.0.15 or a real container, outside the VPS (see [findings](findings.md)).
+- **Real**: checked against real OpenCode 2.0.15 or a real container, outside the VPS (Docker Desktop, Docker-in-Docker or a disposable systemd container).
 - **Tested**: covered by `npm run check` integration tests with simulated Slack and OpenCode.
 - **Configured**: present in repo code or config, never checked at runtime.
-- **Reported**: stated in deployment notes; the VPS was not inspected.
-- **Gap**: a known weakness, with the backlog item that addresses it.
+- **Gap**: a known weakness, with the backlog item that addresses it, or **Open** when no item exists yet.
 
 ## Components
 
@@ -22,37 +23,44 @@ flowchart LR
     Owner([Owner in Slack]) --> Slack[Slack workspace]
     Slack <-- Socket Mode, bot + app tokens --> Bridge
     subgraph Host[VPS host]
-        Bridge[Bridge: Node.js, systemd] --> State[(State dir: config.json,<br/>slack-tag.sqlite, projects/*.env)]
-        Bridge -- docker compose --> Docker[Docker daemon]
-        Bridge -- writes attachments --> Files[Project folder]
-        subgraph Container[One container per project, uid 1000]
-            Server[OpenCode server + safety plugin] --> Agent[Agent shells and tools]
-        end
+        Bridge[Bridge: Node.js, systemd, user slack-tag] --> State[(State dir /var/lib/slack-tag:<br/>config.json, slack-tag.sqlite,<br/>projects/*.env, inbox/)]
+        Bridge -- docker compose, registration --> Docker[Docker daemon]
         Bridge -- HTTP on 127.0.0.1, basic auth --> Server
-        Agent -- bind mount, read-write --> Files
+        subgraph Net[Per-project network st-*, firewalled from host and metadata]
+            subgraph Container[Project container, gVisor]
+                Server[OpenCode server + safety plugin, uid 1000] --> Agent[Agent shells, uid 1001]
+            end
+            Proxy[key-proxy: holds the model key]
+        end
+        Agent -- bind mount, read-write --> Files[Project folder]
+        Agent -- read-only /inbox --> State
         Server --> Data[(/data volume: sessions)]
     end
-    Server -- model key --> Provider[OpenCode Go]
+    Server -- placeholder key --> Proxy
+    Proxy -- real key --> Provider[OpenCode Go]
     Agent --> Internet[Internet]
 ```
 
 | Component | Runs as | Purpose |
 | --- | --- | --- |
-| Bridge (`bridge/src`) | Host process under systemd. Committed unit sets no `User=`, so root; the VPS overrides it to `devuser`, uid 1000 (**Reported**). | Receives Slack events, maps threads to sessions, streams replies, stores attachments, registers projects. |
-| State directory `/var/lib/slack-tag` | Bridge's user | `config.json` (channels, owner, per-project passwords), `slack-tag.sqlite` (thread → session), `projects/<name>.env`. |
-| Credentials `/etc/slack-tag` | root, files `0600` (**Reported**) | `bridge.env` (Slack tokens, shared server password), `opencode.env` (model key, shared server password). |
-| OpenCode container | uid 1000, one per project | `opencode serve` with the project at `/project` and its own `/data` volume. Fixed channels use `deploy/compose.yaml`; registered ones use `deploy/project.yaml`. |
-| Safety plugin (`plugin/`) | Inside the server process | Decides permission requests, strips secrets from agent shells, reports its policy version over RPC. |
+| Bridge (`bridge/src`) | `slack-tag` system user under `deploy/slack-tag.service`, with systemd sandboxing (**Real**, disposable systemd container). The VPS still runs the earlier unit as `devuser`, uid 1000. | Receives Slack events, maps threads to sessions, queues one run per project, streams replies, stores attachments, registers projects. |
+| State directory `/var/lib/slack-tag` | `slack-tag`, `0700`, files created with umask `0027` | `config.json` (channels, owner), `slack-tag.sqlite` (thread → session), `projects/<name>.env` (registered projects' port, network and password), `inbox/<channel>/<thread>/` (uploads). |
+| Credentials `/etc/slack-tag` | root, files `0600`; systemd reads `bridge.env` before dropping to `slack-tag` | `bridge.env` (Slack tokens, one password per hand-made channel), `<project>.env` (that server's password), `proxy.env` (model key). |
+| OpenCode container | Starts as root, `start-server` drops the server to `node` (uid 1000); `agent-shell` runs agent shells as `agent` (uid 1001). gVisor (`runsc`) by default. | `opencode serve` with the project at `/project`, uploads at `/inbox` (read-only) and its own `/data` volume. Hand-made channels use `deploy/compose.yaml`; registered ones use `deploy/project.yaml`. |
+| key-proxy container | uid 1000, read-only, no capabilities | Swaps the placeholder key for the real model key and forwards only to `https://opencode.ai/zen/go/v1`. One per registered project; one shared by hand-made projects. |
+| Safety plugin (`plugin/`) | Inside the server process | Decides permission requests (policy version 3), strips secrets from agent shells, reports its policy version over RPC. |
+| Host firewall (`deploy/firewall.sh`) | root, `slack-tag-firewall.service` | Drops traffic from `st-*` bridges to `169.254.0.0/16` and to the host itself. |
 
-One channel maps to one project and one server; each thread is one session on it. Threads in a channel share the same files. See [project mapping](project-mapping.md).
+One channel maps to one project and one server; each thread is one session on it. Threads in a channel share the same files, and the bridge runs one prompt or server command at a time per project. See [project mapping](project-mapping.md).
 
 ## Trust zones
 
-1. **Owner**: the only Slack user the bridge acts for (`ownerUserId`).
+1. **Owner**: the only Slack user the bridge acts for (`ownerUserId`), in the workspace the bot token belongs to.
 2. **Slack**: delivers events and file URLs. Trusted to say who sent a message.
 3. **Bridge host**: the bridge, its state and credentials, Docker. Fully trusted.
-4. **Agent container**: the OpenCode server and everything the agent runs. Untrusted, because the agent and the server share a uid.
-5. **Internet**: web pages, packages, the model provider. Untrusted input.
+4. **OpenCode server**: holds its own server password; trusted to enforce the plugin's decisions.
+5. **Agent shells**: everything the agent runs. Untrusted. Separated from the server by uid (1001 vs 1000).
+6. **Internet**: web pages, packages, the model provider. Untrusted input.
 
 ## Boundaries
 
@@ -62,87 +70,92 @@ One channel maps to one project and one server; each thread is one session on it
 | --- | --- |
 | Only the owner's messages start or continue sessions; others get an ephemeral refusal and no session is created. | **Tested**, **Live** for the owner path |
 | Owner replies in a mapped thread continue without a mention. | **Tested**, **Live** |
-| Only the owner can register a project or click approval buttons. | **Tested** (register), **Configured** (approvals) |
-| No check that events come from the expected workspace (`team_id` defaults to `""`). | **Gap**: SEC-3 |
-| Approval button values are parsed with an unguarded `JSON.parse` and not matched to the clicked channel or thread. | **Gap**: SEC-3 |
-| The bot token is sent to whatever `url_private` an event names, following redirects. | **Gap**: SEC-3 |
+| The bridge reads its workspace from `auth.test` and ignores events, approval clicks and folder choices from any other workspace. | **Tested** (SEC-3) |
+| Only the owner can register a project, run Slack commands, or click approval buttons. | **Tested** |
+| Approval button values are parsed defensively and must come from the thread where the bridge asked; malformed or misplaced clicks are ignored. | **Tested** (SEC-3) |
+| The bot token is sent only to `https://files.slack.com`; redirects to any other origin are refused. | **Tested** (SEC-3) |
 
 ### Bridge → Slack (output)
 
 | Control | Status |
 | --- | --- |
-| Slack token patterns are redacted from posted and updated messages. | **Tested** |
-| Redaction misses the model key and server passwords, ephemeral messages, and nested block text. | **Gap**: SEC-3 |
-| Error text, including the last 500 characters of `docker compose` stderr during registration, is posted to Slack. | **Gap**: SEC-3 |
-| Agent output can contain `<!channel>` or `<!here>` and ping the channel. | **Gap**: SEC-3 |
+| Slack tokens and every channel's server password are redacted in posts, updates, ephemerals and nested block text. | **Tested** (SEC-3) |
+| `<!channel>`, `<!here>`, `@everyone` and similar in agent output are neutralised. | **Tested** (SEC-3); how real Slack renders them is not verified |
+| Failures post a generic message; details go to the bridge log. Registration still shows the last 500 characters of a failed step's error. | **Tested** |
 
 ### Bridge → OpenCode server
 
 | Control | Status |
 | --- | --- |
 | Servers listen on host `127.0.0.1` only. | **Real** (S5 `docker inspect`) |
-| Basic auth with a server password. Fixed channels share one password; registered projects each get a random 48-hex password. | **Tested** (registration), **Live** (shared password) |
-| A server that does not answer the plugin RPC with policy version 2 marks the channel unavailable, so no prompts are sent. | **Real** (S2), **Tested** |
+| Basic auth with a per-project server password; the bridge refuses to start if two channels share one. | **Tested**, **Real** (SEC-5 PR #6) |
+| A server that does not answer the plugin RPC with policy version 3 marks the channel unavailable, so no prompts are sent. | **Tested** |
 
 ### Bridge → host (files and Docker)
 
 | Control | Status |
 | --- | --- |
-| Attachments are written to `<project>/.slack-tag/inbox/<thread>/` with a sanitized name, a 20 MB cap and a type check. | **Real**, **Tested** |
-| The inbox path check is textual and ignores symlinks; the agent can redirect the next upload, or the `.git/info/exclude` append, to any file the bridge user can write. | **Gap** (reproduced locally): SEC-1 |
+| Uploads go to the bridge-owned `<state dir>/inbox/<channel>/<thread>/` with a sanitized name, a 20 MB cap and a type check; a symlinked inbox folder is refused. The bridge no longer writes into the project or `.git/info/exclude`. | **Tested** (SEC-1) |
+| A `projectDir` that is `/`, contains, or sits inside the state folder stops startup and registration. | **Tested** (SEC-1) |
 | Registration only offers direct, non-symlink subfolders of `projectsRoot` with a safe name. | **Tested** |
-| Registration runs `prepare-project.sh` and `docker compose` as the bridge user, without the Slack tokens or shared password in the child environment. | **Tested** |
-| Docker access is root-equivalent, so the bridge user effectively has root on the host. | **Gap**: SEC-4 |
-| `projectDir` is not validated against `/` or the state directory. | **Gap**: SEC-1 |
+| Registration runs `prepare-project.sh` and `docker compose` without the Slack tokens or other channels' passwords in the child environment. | **Tested** |
+| The bridge runs as the dedicated `slack-tag` user with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, write access only to the state folder, and no capabilities. | **Real** (SEC-4, disposable systemd container) |
+| Registration does not give the bridge Docker access (root-equivalent). With `onboarding.start: "systemd"` the bridge may only `systemctl start slack-tag-project@<name>`, allowed by a polkit rule; root then runs `deploy/start-project.sh`, which checks the bridge-written env file and passes `docker compose` only checked values. | **Tested** (script and polkit rule logic, PR #22); real systemd and polkit not verified |
 
 ### Agent → its container and project
 
 | Control | Status |
 | --- | --- |
-| Non-root uid 1000, read-only image root, all capabilities dropped, `no-new-privileges`, 2 GB memory, 512 processes. | **Real** (S5), **Configured** on the VPS |
-| Only the project folder is visible from the host; other projects, the host and the bridge env are not. | **Real** (S5) |
+| Containers run under gVisor by default (`runsc`), so a kernel exploit hits gVisor's kernel, not the host's. `SLACK_TAG_RUNTIME=runc` is the documented fallback only where gVisor cannot be installed. | **Real** (SEC-5, gVisor in Docker-in-Docker) |
+| Read-only image root, all capabilities dropped except `SETUID`/`SETGID` for the privilege drop, `no-new-privileges`, 2 GB memory, 512 processes. | **Real** (S5, SEC-5) |
+| Only the project folder, its read-only inbox and its own `/data` are visible; other projects, the host and the bridge env are not. | **Real** (S5, SEC-1) |
 | `.opencode/`, `opencode.json(c)`, `.git/hooks` and `.git/config` are read-only, so the agent cannot change its own policy or plant Git hooks. | **Real** (S5, runc and gVisor) |
-| Everything else in the project, including `.env` files, `.git` history and the attachment inbox, is read-write. | By design; damage is unrecoverable (**Gap**: SEC-6) |
-| gVisor runs only when `SLACK_TAG_RUNTIME=runsc`; the VPS runtime was not recorded. | **Gap**: SEC-5 |
+| Agent shells run as `agent` (uid 1001), so they cannot read the server's environment, memory or `/data`, and cannot approve their own permission requests. | **Real** (SEC-5) |
+| Everything else in the project, including `.env` files and `.git` history, is writable by the agent. | By design; damage is unrecoverable (**Gap**: SEC-6) |
+| No CPU or disk limits. | **Gap**: SEC-5 follow-up |
 
 ### Agent → actions (safety plugin and config)
 
 | Control | Status |
 | --- | --- |
-| Policy version 2 allows everything automatically, so the Slack approval flow is never triggered. | **Real** |
-| Denied: shell commands whose first word is `sudo`, edits to protected config paths, and `git push *` (global config). | **Real** |
-| Those denies are text matches; `bash -c 'sudo …'`, `git -C . push` or a script bypass them. Destructive commands such as `rm -rf` or `git reset --hard` run without asking. | **Gap**: SEC-2 |
-| If the plugin throws at runtime, the base config is allow-all. | **Gap**: SEC-2 |
-| Permission requests from subagent sessions are dropped, because their session is not mapped to a thread. | **Gap**: SEC-2 |
+| Policy version 3: reads, project edits and a named list of single shell commands run without asking; everything else, including chained or piped commands and web access, asks the owner in Slack. See `SPEC.md`. | **Tested**, **Real** (SEC-2) |
+| Always refused: `git push` in any form, `sudo`/`su`/`doas`, download-and-run, and edits to protected config. | **Tested** (SEC-2) |
+| No answer within the timeout, a plugin error, or a missing plugin never allows. | **Tested** (SEC-2) |
+| Requests from subagent sessions go to the nearest mapped ancestor's thread; requests with no mapped ancestor are rejected at once. | **Tested** (SEC-2) |
+| Subagent permission requests are not re-posted after a bridge restart. | **Gap**: SEC-2 follow-up |
 
 ### Agent → secrets
 
 | Control | Status |
 | --- | --- |
 | No Slack tokens in containers. | **Real** (S5) |
-| Agent shells get no model key, server password or `SLACK_` variable. | **Real** (S1, S2 with the real Go model) |
-| The server process holds the model key and its password, and the agent shares its uid, so `/proc/1/environ` exposes both. | **Gap**: SEC-5 |
+| The real model key lives only in `key-proxy`; project containers get the placeholder `unused`. | **Real** (SEC-5 PR #6) |
+| Agent shells get no server password or `SLACK_` variable, and as uid 1001 cannot read the server's `/proc/<pid>/environ`. | **Real** (S1, S2, SEC-5) |
+| The agent can still use its project's key proxy to spend inference. | By design |
 
 ### Agent → network
 
 | Control | Status |
 | --- | --- |
-| Outbound traffic is unrestricted: no egress allowlist, no block on the cloud metadata address or host services. | **Gap**: SEC-5 (unverified on the VPS) |
-| Fixed services (`alpha`, `beta`) share one Compose network, and with the shared password one agent could drive the other's server. Registered projects get their own network and password. | **Configured**; **Gap** for fixed services: SEC-5 |
+| Each project has its own Docker network: `st-alpha`, `st-beta` (172.30.x.0/24) for hand-made projects, `st-reg-<n>` (172.31.n.0/24) for registered ones. Projects cannot reach each other. | **Real** (SEC-5) for hand-made; **Configured** for registered |
+| `deploy/firewall.sh` drops traffic from `st-*` networks to the cloud metadata range `169.254.0.0/16` and to the host itself; replies to the bridge's own connections still pass. | **Real** (SEC-5, Docker-in-Docker) |
+| Other internet access stays open by decision (no egress allowlist). | By design (SEC-5, 2026-10-02) |
 
 ## Secrets inventory
 
 | Secret | Stored in | Who can read it |
 | --- | --- | --- |
 | Slack bot and app tokens | `/etc/slack-tag/bridge.env` | root, the bridge process |
-| Model key (`OPENCODE_API_KEY`) | `/etc/slack-tag/opencode.env` | root; every OpenCode server process, and therefore every agent via `/proc` |
-| Shared server password | Both env files | root, the bridge, fixed-service servers and their agents |
-| Per-project server passwords | `config.json` and `projects/<name>.env`, both `0600` | The bridge user; that project's server and agent |
-| Thread → session map | `slack-tag.sqlite` | The bridge user; the state dir is created `0755` and the database with the default umask (**Gap**: SEC-4) |
-| Conversation history | Each container's `/data` volume | That project's server and agent; root |
+| Model key (`OPENCODE_API_KEY`) | `/etc/slack-tag/proxy.env` | root, the key-proxy containers |
+| Hand-made channel server passwords | `bridge.env` (as each channel's `passwordEnv`) and that project's env file | root, the bridge, that project's server (uid 1000) |
+| Registered project server passwords | `<state dir>/projects/<name>.env`, `0600` | The bridge user, that project's server |
+| Thread → session map | `slack-tag.sqlite` | The bridge user (state folder `0700`) |
+| Conversation history | Each container's `/data` volume | That project's server (not its agent shells); root |
 
-## Pending changes not yet reflected
+## Verification still needed on the VPS
 
-- `feat/key-proxy` moves the model key into a separate proxy container (part of SEC-5). Not merged.
-- `feat/project-queue` runs one prompt at a time per project. Not merged.
-- `feat/slack-commands` runs OpenCode commands from Slack mentions (CMD-1). Not merged.
+Before relying on SEC-1 to SEC-5 in production, after an authorized deployment:
+
+- From an agent shell: `id` shows uid 1001, `/proc/1/environ` is unreadable, `169.254.169.254` and the host's address are unreachable, and the key proxy answers.
+- `docker inspect` shows `runsc` for every project container and an `st-` bridge name for every project network.
+- The bridge runs as `slack-tag`; `systemctl start slack-tag-project@<name>` works for it, while any other unit or `stop` is denied.
