@@ -37,7 +37,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 12. As the owner, I want restricted or destructive actions to wait for my approval, so that I control consequential operations.
 13. As the owner, I want approval to authorize only the pending action, so that one approval does not grant broad future permission.
 14. As the owner, I want rejected or unanswered requests to remain unexecuted, so that silence never grants permission.
-15. As the owner, I want other Slack users unable to issue commands or approve actions, so that only I control the prototype.
+15. As the owner, I want my workspace teammates to talk to the agent in mapped channels while only I approve actions and register channels, so that we can share a project without giving up control of consequential operations.
 16. As the owner, I want project execution isolated from other projects and the host, so that an agent's mistakes have a limited blast radius.
 17. As the owner, I want to use OpenCode's supported authentication and available provider access, so that the bridge does not introduce its own inference billing layer.
 18. As a maintainer, I want backend-specific behavior behind an adapter, so that adding another compatible agent does not require rewriting the Slack integration.
@@ -50,7 +50,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 ### Scope and responsibilities
 
 - The bridge transports messages, routes sessions, persists associations, handles attachments, and relays permission decisions. It does not implement its own agent reasoning or tool catalog.
-- One configured Slack owner identity controls messages and approval actions. Multi-user roles and onboarding are excluded.
+- Any member of the bridge's workspace can send messages in a mapped channel. One configured Slack owner identity registers channels and decides approval actions. Finer multi-user roles are excluded.
 - Channel-to-folder mappings are operator configuration, not agent-controlled paths or a provisioning UI.
 - A channel selects one project environment. Threads within it use separate sessions, not separate copies of the project files.
 - The bridge runs one prompt at a time per project, in arrival order across all its threads, so sessions never edit the shared files concurrently. A message that has to wait gets a "Queued" reply. The queue is in memory; messages still waiting when the bridge restarts are dropped.
@@ -117,7 +117,7 @@ The manual checks must demonstrate these behaviours:
 
 | Feature | Behavioral acceptance |
 | --- | --- |
-| Owner-only access | Owner messages work; another user's messages and approval clicks cannot trigger execution. |
+| Access | Messages from any workspace member in a mapped channel work; another user's approval clicks and registration choices cannot trigger execution. |
 | Channel routing | A request uses the configured project's files and instructions; an unmapped channel cannot launch arbitrary project work. |
 | Thread sessions | Replies retain the current thread's conversation; another thread begins a separate session without the first thread's chat history. |
 | Persistence | After restarting the bridge and backend with retained storage, a thread resumes its existing conversation rather than starting over. |

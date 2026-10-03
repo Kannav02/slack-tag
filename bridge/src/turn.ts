@@ -329,15 +329,16 @@ export function createRouter(
     const thread = m.threadTs ? db.thread(m.teamId, m.channelId, m.threadTs) : undefined;
     if (!m.mention && !thread) return;
     const say = (text: string) => slack.post(m.channelId, threadTs, text);
-    if (m.userId !== config.ownerUserId)
-      return slack.ephemeral(
-        m.channelId,
-        m.userId,
-        threadTs,
-        "Only the owner can talk to OpenCode here.",
-      );
+    // main.ts already dropped other workspaces, so any member of a mapped channel may talk to its project.
     const runtime = channels.get(m.channelId);
     if (!runtime) {
+      if (m.userId !== config.ownerUserId)
+        return slack.ephemeral(
+          m.channelId,
+          m.userId,
+          threadTs,
+          "This channel is not mapped to a project. Only the owner can register one.",
+        );
       if (m.text.trim().toLowerCase() === "register") return offer(m.channelId, threadTs);
       return say(
         "This channel is not mapped to a project. Mention me with `register` to connect a project folder.",
@@ -373,7 +374,7 @@ export function createRouter(
     for (const file of m.files) files.push(await store(channel, threadTs, file, slack.download));
 
     const sessionId = thread?.session_id ?? (await start(channel.model));
-    const text = cmd ? cmd.args : m.text.trim() || "The owner sent the attached files.";
+    const text = cmd ? cmd.args : m.text.trim() || "The user sent the attached files.";
     await enqueue(channel.projectDir, {
       client,
       sessionId,

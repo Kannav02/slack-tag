@@ -412,10 +412,11 @@ await test(
       permission,
       prompted,
     } = await harness(t);
-    send({ ts: "100.1", user: "UOTHER" });
+    // Only the owner may register an unmapped channel.
+    send({ ts: "100.1", user: "UOTHER", channel: "CUNMAPPED" });
     await until(() => messages.some((m) => m.method === "chat.postEphemeral"));
     assert.equal(messages[0]?.user, "UOTHER");
-    assert.match(messages[0]?.text ?? "", /Only the owner/);
+    assert.match(messages[0]?.text ?? "", /Only the owner can register/);
     assert.equal(sessions.length, 0);
     assert.equal(prompts.length, 0);
 
@@ -457,8 +458,10 @@ await test(
     assert.deepEqual(last.blocks, [{ type: "markdown", text: last.text }]);
     assert.ok(!JSON.stringify(messages).includes("synthetic-secret"));
 
-    send({ ts: "100.4", thread_ts: "100.3", text: "continue without a mention" });
+    // Another member of the mapped channel continues the same session.
+    send({ ts: "100.4", thread_ts: "100.3", user: "UOTHER", text: "continue without a mention" });
     await until(() => prompts.length === 2);
+    assert.equal(prompts[1]?.text, "continue without a mention");
     assert.equal(prompts[1]?.sessionID, sessionID);
     assert.equal(prompts[1]?.delivery, "queue");
     assert.equal(sessions.length, 1);

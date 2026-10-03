@@ -1,6 +1,6 @@
 # Slack Tag
 
-A self-hosted Slack interface to OpenCode: each configured channel selects a project, and each thread has its own persistent agent conversation. The deployed version is owner-only; Slack project onboarding is planned.
+A self-hosted Slack interface to OpenCode: each configured channel selects a project, and each thread has its own persistent agent conversation. Any member of the workspace can talk to it in a mapped channel; registering channels and approving actions are owner-only.
 
 ## Development
 
