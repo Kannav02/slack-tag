@@ -2,20 +2,27 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import plugin from "../plugin/index.ts"
 
+type Setup = Parameters<typeof plugin.setup>[0]
+type PermissionInput = { sessionID: string; action: string; resources: unknown[]; effect: string }
+
 // Load the plugin as OpenCode does and call its permission hook with representative requests.
 test("permission hook allows safe work, asks for the rest, and denies push, sudo and download-and-run", async () => {
-  const hooks = {}
-  await plugin.setup({
+  const hooks = new Map<string, (input: PermissionInput) => void>()
+  // Only the parts of OpenCode's plugin host that the plugin uses.
+  const host = {
     rpc: { register: async () => undefined },
-    permission: { hook: async (name, fn) => { hooks[name] = fn } },
+    permission: { hook: async (name: string, fn: (input: PermissionInput) => void) => { hooks.set(name, fn) } },
     shell: { hook: async () => undefined },
-  })
-  const effect = (action, ...resources) => {
-    const input = { sessionID: "ses_1", action, resources, effect: "allow" }
-    hooks.evaluate(input)
+  }
+  await plugin.setup(host as unknown as Setup)
+  const evaluate = hooks.get("evaluate")
+  assert.ok(evaluate)
+  const effect = (action: string, ...resources: unknown[]) => {
+    const input: PermissionInput = { sessionID: "ses_1", action, resources, effect: "allow" }
+    evaluate(input)
     return input.effect
   }
-  const shell = (command) => effect("shell", command)
+  const shell = (command: string) => effect("shell", command)
 
   for (const command of ["ls -la", "cat src/a.ts", "git status", "git diff HEAD~1", "git log --oneline", "git add .",
     "git commit -m 'push fix'", "npm test", "pnpm run build", "yarn install", "npm ci", "pytest -q", "make", "tsc --noEmit",

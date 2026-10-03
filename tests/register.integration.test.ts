@@ -1,16 +1,41 @@
 import assert from "node:assert/strict"
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcessByStdio } from "node:child_process"
 import { once } from "node:events"
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises"
-import { createServer } from "node:http"
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { Readable } from "node:stream"
+import { text } from "node:stream/consumers"
 import { test } from "node:test"
 import { setTimeout as delay } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
-import { WebSocketServer } from "ws"
+import { WebSocketServer, type WebSocket } from "ws"
+import { z } from "zod"
 
 const root = fileURLToPath(new URL("../", import.meta.url))
+
+// Requests the bridge sends to the fake services; loose objects keep every field.
+const blockList = z.array(z.looseObject({
+  type: z.string(),
+  elements: z.array(z.looseObject({ action_id: z.string().optional(), options: z.array(z.looseObject({ value: z.string() })).optional() })).optional(),
+}))
+const slackCall = z.looseObject({
+  channel: z.string().optional(),
+  text: z.string().optional(),
+  ts: z.string().optional(),
+  thread_ts: z.string().optional(),
+  blocks: z.preprocess((value): unknown => (typeof value === "string" ? JSON.parse(value) : value), blockList).optional(),
+})
+const sessionCall = z.looseObject({ location: z.object({ directory: z.string() }) })
+const promptCall = z.looseObject({ text: z.string() })
+const savedConfig = z.object({ channels: z.record(z.string(), z.unknown()) })
+
+function portOf(server: Server) {
+  const address = server.address()
+  assert.ok(address && typeof address === "object")
+  return address.port
+}
 
 // The real bridge and prepare-project.sh run; Slack, OpenCode and the docker CLI are stand-ins.
 test("registering a project folder from Slack", { timeout: 30_000 }, async (t) => {
@@ -19,24 +44,22 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   // The bridge state folder must stay outside every project, so the config gets its own folder.
   const state = join(work, "state")
   const envFile = join(state, "projects", "app-one.env")
-  const messages = []
-  const sessions = []
-  const prompts = []
-  const streams = new Set()
-  let child, socket
+  const messages: (z.infer<typeof slackCall> & { method: string | undefined; ts: string })[] = []
+  const sessions: z.infer<typeof sessionCall>[] = []
+  const prompts: z.infer<typeof promptCall>[] = []
+  const unexpected: string[] = []
+  const streams = new Set<ServerResponse>()
+  let child: ChildProcessByStdio<null, Readable, Readable> | undefined
+  let socket: WebSocket | undefined
   let logs = ""
   let sequence = 0
-  let base
+  let base = ""
 
   const projectPassword = async () => (await readFile(envFile, "utf8")).match(/SLACK_TAG_PASSWORD=(\w+)/)?.[1]
-  const handler = async (req, res) => {
-    const chunks = []
-    for await (const chunk of req) chunks.push(chunk)
-    const raw = Buffer.concat(chunks).toString()
-    const args = req.headers["content-type"]?.includes("json") ? JSON.parse(raw || "{}") : Object.fromEntries(new URLSearchParams(raw))
-    if (typeof args.blocks === "string") args.blocks = JSON.parse(args.blocks)
-    const path = new URL(req.url, base).pathname
-    const json = (value) => {
+  async function respond(req: IncomingMessage, res: ServerResponse, raw: string) {
+    const args: unknown = req.headers["content-type"]?.includes("json") ? JSON.parse(raw || "{}") : Object.fromEntries(new URLSearchParams(raw))
+    const path = new URL(req.url ?? "/", base).pathname
+    const json = (value: unknown) => {
       res.writeHead(200, { "content-type": "application/json" })
       res.end(JSON.stringify(value))
     }
@@ -56,19 +79,28 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
     }
     if (path === "/api/rpc/slack-tag/status") return json({ output: { pluginVersion: "test", policyVersion: 3 } })
     if (path === "/api/session" && req.method === "POST") {
-      sessions.push(args)
+      sessions.push(sessionCall.parse(args))
       return json({ data: { id: `ses_${sessions.length}` } })
     }
     if (/^\/api\/session\/[^/]+\/prompt$/.test(path)) {
-      prompts.push(args)
+      prompts.push(promptCall.parse(args))
       return json({})
     }
     if (/^\/api\/session\/[^/]+\/permission$/.test(path)) return json({ data: [] })
     if (path === "/api/auth.test") return json({ ok: true, user_id: "UBOT", team_id: "TTEST" })
     if (path === "/api/apps.connections.open") return json({ ok: true, url: `${base.replace("http:", "ws:")}/socket` })
-    const ts = args.ts ?? `200.${++sequence}`
-    messages.push({ method: path.split("/").at(-1), ...args, ts })
-    json({ ok: true, ts, channel: args.channel })
+    const call = slackCall.parse(args)
+    const ts = call.ts ?? `200.${++sequence}`
+    messages.push({ method: path.split("/").at(-1), ...call, ts })
+    json({ ok: true, ts, channel: call.channel })
+  }
+  const handler = (req: IncomingMessage, res: ServerResponse) => {
+    text(req)
+      .then((raw) => respond(req, res, raw))
+      .catch((error: unknown) => {
+        unexpected.push(error instanceof Error ? error.message : "request failed")
+        res.destroy()
+      })
   }
   // Slack is served from the start; the project's OpenCode only once `docker compose up` succeeds.
   const server = createServer(handler)
@@ -93,14 +125,14 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
     wss.close()
     for (const s of [server, opencode]) {
       s.closeAllConnections()
-      if (s.listening) await new Promise((resolve) => s.close(resolve))
+      if (s.listening) await new Promise<void>((resolve) => s.close(() => resolve()))
     }
     await rm(work, { recursive: true, force: true })
   })
-  async function until(check) {
+  async function until(check: () => unknown) {
     const deadline = Date.now() + 8000
     while (!(await check())) {
-      if (Date.now() > deadline) throw new Error(`Timed out waiting for bridge outcome.\n${logs}\n${JSON.stringify(messages, null, 1)}`)
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for bridge outcome.\n${logs}\n${unexpected.join("\n")}\n${JSON.stringify(messages, null, 1)}`)
       await delay(20)
     }
   }
@@ -120,19 +152,20 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
       },
       stdio: ["ignore", "pipe", "pipe"],
     })
-    child.stdout.on("data", (chunk) => { logs += chunk })
-    child.stderr.on("data", (chunk) => { logs += chunk })
+    child.stdout.on("data", (chunk: Buffer) => { logs += chunk.toString() })
+    child.stderr.on("data", (chunk: Buffer) => { logs += chunk.toString() })
     await until(() => socket && logs.includes("bridge connected"))
   }
-  function send(type, payload) {
+  function send(type: string, payload: object) {
     const id = `event-${++sequence}`
+    assert.ok(socket)
     socket.send(JSON.stringify({ envelope_id: id, type, accepts_response_payload: false, payload }))
   }
-  const mention = (event) => send("events_api", {
+  const mention = (event: Record<string, unknown>) => send("events_api", {
     type: "event_callback", team_id: "TTEST", api_app_id: "ATEST", event_id: `ev-${sequence}`,
     event: { type: "message", channel: "CNEW", user: "UOWNER", text: "<@UBOT> register", ts: `100.${sequence}`, ...event },
   })
-  const choose = (value, user = "UOWNER") => send("interactive", {
+  const choose = (value: string, user = "UOWNER") => send("interactive", {
     type: "block_actions", user: { id: user }, team: { id: "TTEST" }, channel: { id: "CNEW" }, api_app_id: "ATEST", trigger_id: "t",
     message: { ts: offerTs, thread_ts: "100.1" }, container: { type: "message", message_ts: offerTs, channel_id: "CNEW" },
     actions: [{ type: "static_select", action_id: "register_folder", block_id: "b", selected_option: { value }, action_ts: "1" }],
@@ -146,11 +179,11 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   for (const dir of ["app-one", "taken", ".hidden"]) await mkdir(join(code, dir), { recursive: true })
   await writeFile(join(code, "notes.txt"), "not a folder")
   await symlink(work, join(code, "link"))
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
-  base = `http://127.0.0.1:${server.address().port}`
-  await new Promise((resolve) => opencode.listen(0, "127.0.0.1", resolve))
-  const port = opencode.address().port
-  await new Promise((resolve) => opencode.close(resolve))
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()))
+  base = `http://127.0.0.1:${portOf(server)}`
+  await new Promise<void>((resolve) => opencode.listen(0, "127.0.0.1", () => resolve()))
+  const port = portOf(opencode)
+  await new Promise<void>((resolve) => opencode.close(() => resolve()))
   await mkdir(state)
   // An earlier registration already uses network 1.
   await mkdir(join(state, "projects"))
@@ -166,13 +199,14 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   mention({ ts: "100.1" })
   await until(() => messages.some((m) => m.blocks?.[1]?.elements?.[0]?.action_id === "register_folder"))
   const offer = messages.find((m) => m.blocks?.[1])
+  assert.ok(offer)
   const offerTs = offer.ts
   assert.equal(offer.thread_ts, "100.1")
-  assert.deepEqual(offer.blocks[1].elements[0].options.map((o) => o.value), ["app-one"])
+  assert.deepEqual(offer.blocks?.[1]?.elements?.[0]?.options?.map((o) => o.value), ["app-one"])
 
   choose("app-one", "UOTHER")
   await until(() => messages.some((m) => m.method === "chat.postEphemeral"))
-  assert.match(messages.find((m) => m.method === "chat.postEphemeral").text, /Only the owner/)
+  assert.match(messages.find((m) => m.method === "chat.postEphemeral")?.text ?? "", /Only the owner/)
 
   choose("../taken")
   await until(() => status().includes("is not a folder"))
@@ -187,7 +221,7 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   await rm(join(work, "fail"))
   choose("app-one")
   await until(async () => (await dockerCalls()).length === 2)
-  await new Promise((resolve) => opencode.listen(port, "127.0.0.1", resolve))
+  await new Promise<void>((resolve) => opencode.listen(port, "127.0.0.1", () => resolve()))
   await until(() => status().includes("Connected"))
   assert.equal(await readFile(envFile, "utf8"), firstEnv)
 
@@ -201,6 +235,7 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   assert.ok((await stat(join(state, "inbox", "app-one"))).isDirectory())
   assert.equal((await stat(envFile)).mode & 0o777, 0o600)
   const password = await projectPassword()
+  assert.ok(password)
   assert.match(password, /^[0-9a-f]{48}$/)
   assert.match(firstEnv, new RegExp(`SLACK_TAG_PROJECT=${join(code, "app-one")}\nSLACK_TAG_PORT=${port}\n`))
   // Its own network (subnet and st- bridge in project.yaml), skipping the one already in use.
@@ -208,7 +243,7 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   await stat(join(code, "app-one", "opencode.json"))
   await stat(join(code, "app-one", ".git", "config"))
 
-  const saved = JSON.parse(await readFile(join(state, "config.json"), "utf8"))
+  const saved = savedConfig.parse(JSON.parse(await readFile(join(state, "config.json"), "utf8")))
   assert.equal((await stat(join(state, "config.json"))).mode & 0o777, 0o600)
   // The channel points at the project's env file; the password itself is stored only there.
   assert.deepEqual(saved.channels.CNEW, { name: "app-one", projectDir: join(code, "app-one"), serverDir: "/project", opencodeUrl: `http://127.0.0.1:${port}`, passwordFile: envFile, model: "test/test" })
@@ -218,12 +253,13 @@ test("registering a project folder from Slack", { timeout: 30_000 }, async (t) =
   // The new channel works without a restart, and again after one.
   mention({ ts: "100.50", text: "<@UBOT> hello" })
   await until(() => prompts.length === 1)
-  assert.equal(sessions[0].location.directory, "/project")
-  assert.equal(prompts[0].text, "hello")
+  assert.equal(sessions[0]?.location.directory, "/project")
+  assert.equal(prompts[0]?.text, "hello")
   await stop()
   await start()
   mention({ ts: "100.60", text: "<@UBOT> after restart" })
   await until(() => prompts.length === 2)
-  assert.equal(prompts[1].text, "after restart")
+  assert.equal(prompts[1]?.text, "after restart")
   assert.match(logs, /channel CNEW \(app-one\) ready/)
+  assert.deepEqual(unexpected, [])
 })
