@@ -1,13 +1,15 @@
 # One fixed service per mapped channel. Run deploy/prepare-project.sh on each project first.
-# SLACK_TAG_RUNTIME=runsc when gVisor is installed. Otherwise the default is runc.
+# Project containers run under gVisor. Set SLACK_TAG_RUNTIME=runc only where gVisor cannot be installed.
 x-channel: &channel
   image: slack-tag-opencode:2.0.15
-  runtime: ${SLACK_TAG_RUNTIME:-runc}
+  runtime: ${SLACK_TAG_RUNTIME:-runsc}
   restart: unless-stopped
-  user: "1000:1000"
+  # start-server drops to node (uid 1000); agent-shell drops agent shells to agent (uid 1001).
+  user: "0:0"
   init: true
   read_only: true
   cap_drop: [ALL]
+  cap_add: [SETUID, SETGID]
   security_opt: ["no-new-privileges:true"]
   mem_limit: 2g
   pids_limit: 512
@@ -29,8 +31,10 @@ services:
     pids_limit: 64
     env_file: ${PROXY_ENV_FILE:-/etc/slack-tag/proxy.env}
     command: ["node", "--experimental-strip-types", "/opt/slack-tag/proxy/key-proxy.ts"]
-    # Joins every project network; projects cannot reach each other.
-    networks: [alpha, beta]
+    # Joins every project network at a fixed address; projects cannot reach each other.
+    networks:
+      alpha: { ipv4_address: 172.30.1.2 }
+      beta: { ipv4_address: 172.30.2.2 }
 
   alpha:
     <<: *channel
@@ -38,26 +42,31 @@ services:
     # Holds this server's own OPENCODE_SERVER_PASSWORD.
     env_file: ${ALPHA_ENV_FILE:-/etc/slack-tag/alpha.env}
     networks: [alpha]
+    # gVisor cannot use Docker's built-in DNS, so key-proxy is found by its fixed address.
+    extra_hosts: ["key-proxy:172.30.1.2"]
     ports: ["127.0.0.1:${ALPHA_PORT:-4101}:4096"]
     volumes:
       - ${ALPHA_PROJECT:?set ALPHA_PROJECT}:/project
       - alpha-data:/data
+      - ./resolv.conf:/etc/resolv.conf:ro
       - ${ALPHA_PROJECT}/.opencode:/project/.opencode:ro
       - ${ALPHA_PROJECT}/opencode.json:/project/opencode.json:ro
       - ${ALPHA_PROJECT}/opencode.jsonc:/project/opencode.jsonc:ro
       - ${ALPHA_PROJECT}/.git/hooks:/project/.git/hooks:ro
       - ${ALPHA_PROJECT}/.git/config:/project/.git/config:ro
 
-  # Copy this service for each further channel, with its own port, project, env file, network, and data volume.
+  # Copy this service for each further channel, with its own port, project, env file, network, subnet, and data volume.
   beta:
     <<: *channel
     profiles: [extra]
     env_file: ${BETA_ENV_FILE:-/etc/slack-tag/beta.env}
     networks: [beta]
+    extra_hosts: ["key-proxy:172.30.2.2"]
     ports: ["127.0.0.1:${BETA_PORT:-4102}:4096"]
     volumes:
       - ${BETA_PROJECT:-/nonexistent}:/project
       - beta-data:/data
+      - ./resolv.conf:/etc/resolv.conf:ro
       - ${BETA_PROJECT:-/nonexistent}/.opencode:/project/.opencode:ro
       - ${BETA_PROJECT:-/nonexistent}/opencode.json:/project/opencode.json:ro
       - ${BETA_PROJECT:-/nonexistent}/opencode.jsonc:/project/opencode.jsonc:ro
@@ -68,6 +77,11 @@ volumes:
   alpha-data:
   beta-data:
 
+# Bridge names start with st- so deploy/firewall.sh can block the metadata address and the host for them.
 networks:
   alpha:
+    driver_opts: { com.docker.network.bridge.name: st-alpha }
+    ipam: { config: [{ subnet: 172.30.1.0/24 }] }
   beta:
+    driver_opts: { com.docker.network.bridge.name: st-beta }
+    ipam: { config: [{ subnet: 172.30.2.0/24 }] }

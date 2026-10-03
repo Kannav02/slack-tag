@@ -13,7 +13,13 @@ COPY plugin plugin
 COPY deploy/opencode.global.jsonc opencode/opencode.jsonc
 COPY proxy proxy
 
-RUN mkdir -p /data /project && chown node:node /data /project
+COPY deploy/start-server.sh /usr/local/bin/start-server
+COPY deploy/agent-shell.sh /usr/local/bin/agent-shell
+
+# Agent shells run as agent (uid 1001) in the node group, so they can edit the project but not read the server.
+RUN mkdir -p /data /project && chown node:node /data /project && chmod 700 /data \
+  && useradd --uid 1001 --gid node --no-create-home --shell /bin/bash agent \
+  && git config --system safe.directory '*'
 
 ENV HOME=/data \
   XDG_CONFIG_HOME=/opt/slack-tag \
@@ -21,7 +27,6 @@ ENV HOME=/data \
   XDG_STATE_HOME=/data/state \
   XDG_CACHE_HOME=/data/cache
 
-USER node
 WORKDIR /project
 EXPOSE 4096
-CMD ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]
+CMD ["start-server"]

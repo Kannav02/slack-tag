@@ -8,7 +8,7 @@ Use the production Slack app here, never the dev app used by cloud agents. Socke
 
 ## Install
 
-Node.js 22.18 or later must be at `/usr/bin/node`, and Docker must have the Compose plugin. Install gVisor (`runsc`) if the VPS supports it. The checkout lives at `/opt/slack-tag`. The bridge writes `slack-tag.sqlite` beside `SLACK_TAG_CONFIG`, so the config lives in `/var/lib/slack-tag`.
+Node.js 22.18 or later must be at `/usr/bin/node`, and Docker must have the Compose plugin. Project containers run under gVisor by default: install `runsc` from the [gVisor apt repository](https://gvisor.dev/docs/user_guide/install/) and run `runsc install && systemctl restart docker`. Where gVisor cannot run, put `SLACK_TAG_RUNTIME=runc` in `deploy/.env`. The checkout lives at `/opt/slack-tag`. The bridge writes `slack-tag.sqlite` beside `SLACK_TAG_CONFIG`, so the config lives in `/var/lib/slack-tag`.
 
 1. Put the repo at `/opt/slack-tag` at the commit to run, and install both packages.
 
@@ -36,12 +36,12 @@ install -d -m 0755 /etc/slack-tag /var/lib/slack-tag
 docker compose -f deploy/compose.yaml up -d --build
 ```
 
-6. Install the unit and start the bridge.
+6. Install the units and start the firewall and the bridge. The firewall blocks project containers from the cloud metadata address and from the host; other internet access stays open.
 
 ```bash
-install -m 0644 deploy/slack-tag.service /etc/systemd/system/slack-tag.service
+install -m 0644 deploy/slack-tag.service deploy/slack-tag-firewall.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now slack-tag
+systemctl enable --now slack-tag-firewall slack-tag
 ```
 
 `journalctl -u slack-tag` names each channel as ready or unavailable. A channel is unavailable when its server is down or the safety plugin check fails. The bridge checks again on the next mention.
@@ -51,6 +51,7 @@ systemctl enable --now slack-tag
 1. In `/opt/slack-tag`, check out the new commit and rerun the two `npm ci` commands.
    - Upgrading to the key proxy: create `proxy.env` as in install step 2, move `OPENCODE_API_KEY` from `opencode.env` into it, and delete the line from `opencode.env`. Compose overrides any key left in `opencode.env`, but do not keep a second copy.
    - Upgrading to per-project passwords: for each project, create its env file (`alpha.env`) with a new random `OPENCODE_SERVER_PASSWORD`, add the same value to `bridge.env` under the channel's `passwordEnv` name, and add `passwordEnv` to each channel in `config.json`. Then remove `OPENCODE_SERVER_PASSWORD` from `bridge.env` and delete `opencode.env`. Rolling back to an earlier commit needs both restored.
+   - Upgrading to the separate agent user, gVisor and firewall: rerun `deploy/prepare-project.sh` on each project (agent shells run as uid 1001 in group 1000, so the project needs group write), install gVisor as in the install section, and install and enable `slack-tag-firewall` as in install step 6. Compose now gives each project network a fixed subnet (`172.30.N.0/24`); `docker compose down` before `up` so the networks are recreated.
 2. Rebuild the containers and restart the bridge. Do not replace the env files.
 
 ```bash
