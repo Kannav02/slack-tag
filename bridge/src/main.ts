@@ -15,11 +15,31 @@ function required(name: string): string {
 const configPath = required("SLACK_TAG_CONFIG")
 const botToken = required("SLACK_BOT_TOKEN")
 const appToken = required("SLACK_APP_TOKEN")
+// Only this origin receives the bot token. SLACK_FILES_URL exists for the simulated Slack in tests.
+const filesOrigin = new URL(process.env.SLACK_FILES_URL ?? "https://files.slack.com").origin
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : "unknown error")
-const redact = (text: string) => text.replace(/xox[a-z]-[A-Za-z0-9-]+|xapp-[A-Za-z0-9-]+/g, "[redacted]")
-const redactBlocks = (blocks?: object[]) => blocks?.map((block) =>
-  "text" in block && typeof block.text === "string" ? { ...block, text: redact(block.text) } : block,
-)
+const secrets: string[] = []
+const redact = (text: string) => secrets.reduce((out, secret) => out.replaceAll(secret, "[redacted]"),
+  text.replace(/xox[a-z]-[A-Za-z0-9-]+|xapp-[A-Za-z0-9-]+/g, "[redacted]"))
+// Agent output must not notify a whole channel or workspace.
+const quiet = (text: string) => text.replace(/<!(channel|here|everyone)(\|[^>]*)?>/g, "@\u200b$1").replace(/@(channel|here|everyone)\b/g, "@\u200b$1")
+const clean = (text: string) => quiet(redact(text))
+const cleanBlocks = (value: unknown, key?: string): unknown =>
+  typeof value === "string" ? (key === "text" ? clean(value) : value)
+  : Array.isArray(value) ? value.map((item) => cleanBlocks(item))
+  : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cleanBlocks(v, k)]))
+  : value
+
+async function download(url: string): Promise<Response> {
+  for (let hops = 0; hops < 3; hops++) {
+    if (new URL(url).origin !== filesOrigin) throw new Error(`refused to download from ${new URL(url).host}`)
+    const response = await fetch(url, { headers: { authorization: `Bearer ${botToken}` }, redirect: "manual" })
+    const location = response.headers.get("location")
+    if (response.status < 300 || response.status >= 400 || !location) return response
+    url = new URL(location, url).href
+  }
+  throw new Error("too many redirects")
+}
 
 const config = loadConfig(configPath)
 const db = openDb(join(dirname(configPath), "slack-tag.sqlite"))
@@ -30,6 +50,7 @@ for (const [id, channel] of Object.entries(config.channels)) {
   const password = required(channel.passwordEnv)
   if (passwords.has(password)) throw new Error(`channel ${id} reuses another channel's server password`)
   passwords.add(password)
+  secrets.push(password)
   const client = connect(channel.opencodeUrl, password)
   const available = await pluginReady(client)
   channels.set(id, { channel, client, available })
@@ -39,20 +60,23 @@ for (const [id, channel] of Object.entries(config.channels)) {
 const app = new bolt.App({ token: botToken, appToken, socketMode: true, clientOptions: process.env.SLACK_API_URL ? { slackApiUrl: process.env.SLACK_API_URL } : {} })
 const slack: SlackApi = {
   async post(channel, thread_ts, text, blocks) {
-    const posted = await app.client.chat.postMessage({ channel, thread_ts, text: redact(text), blocks: redactBlocks(blocks) as never })
+    const posted = await app.client.chat.postMessage({ channel, thread_ts, text: clean(text), blocks: cleanBlocks(blocks) as never })
     if (!posted.ts) throw new Error("Slack did not return a message ts")
     return posted.ts
   },
   async update(channel, ts, text, blocks) {
-    await app.client.chat.update({ channel, ts, text: redact(text), blocks: redactBlocks(blocks) as never })
+    await app.client.chat.update({ channel, ts, text: clean(text), blocks: cleanBlocks(blocks) as never })
   },
   async ephemeral(channel, user, thread_ts, text) {
-    await app.client.chat.postEphemeral({ channel, user, ...(thread_ts === undefined ? {} : { thread_ts }), text })
+    await app.client.chat.postEphemeral({ channel, user, ...(thread_ts === undefined ? {} : { thread_ts }), text: clean(text) })
   },
-  download: (url) => fetch(url, { headers: { authorization: `Bearer ${botToken}` } }),
+  download,
 }
 const router = createRouter(config, db, slack, channels)
-const botId = (await app.client.auth.test()).user_id
+const auth = await app.client.auth.test()
+const botId = auth.user_id
+// The app could be installed elsewhere; only this workspace may drive it.
+const teamId = auth.team_id
 const mention = `<@${botId}>`
 
 for (const { client } of channels.values()) subscribe(client, router.onEvent)
@@ -61,11 +85,11 @@ setInterval(() => void router.expire(), 15_000)
 
 app.event("message", async ({ event, body }) => {
   const m = event as { subtype?: string; bot_id?: string; user?: string; text?: string; ts: string; thread_ts?: string; channel: string; files?: SlackFile[] }
-  if ((m.subtype && m.subtype !== "file_share") || m.bot_id || !m.user) return
+  if (body.team_id !== teamId || (m.subtype && m.subtype !== "file_share") || m.bot_id || !m.user) return
   const text = m.text ?? ""
   await router
     .handle({
-      teamId: body.team_id ?? "",
+      teamId,
       channelId: m.channel,
       userId: m.user,
       text: text.replaceAll(mention, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"),
@@ -76,14 +100,15 @@ app.event("message", async ({ event, body }) => {
     })
     .catch(async (error: unknown) => {
       console.error("message failed:", redact(messageOf(error)))
-      await slack.post(m.channel, m.thread_ts ?? m.ts, `The request failed: ${messageOf(error)}`).catch(() => undefined)
+      await slack.post(m.channel, m.thread_ts ?? m.ts, "The request failed. The details are in the bridge log.").catch(() => undefined)
     })
 })
 
 for (const [actionId, decision] of [["approve", "once"], ["reject", "reject"]] as const) {
   app.action(actionId, async ({ ack, body, action }) => {
     await ack()
-    const b = body as { user: { id: string }; channel?: { id: string }; message?: { ts: string; thread_ts?: string } }
+    const b = body as { team?: { id: string }; user: { id: string }; channel?: { id: string }; message?: { ts: string; thread_ts?: string } }
+    if (b.team?.id !== teamId) return
     await router
       .click(b.user.id, decision, (action as { value: string }).value, b.channel?.id ?? "", b.message?.thread_ts ?? b.message?.ts)
       .catch((error: unknown) => console.error("click failed:", redact(messageOf(error))))
