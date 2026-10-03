@@ -13,13 +13,13 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-5 | Keep secrets out of agent reach; isolate projects | High | Done in PRs, VPS pending |
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Done; keep updated |
-| CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
+| CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
 | DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
 
 ## Current behavior
 
-The bridge accepts only the configured owner. A mention creates a session; owner replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout. Command dispatch, worktrees and automatic idle server shutdown are not implemented.
+The bridge accepts only the configured owner. A mention creates a session; owner replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout. Worktrees and automatic idle server shutdown are not implemented.
 
 Policy version 2 allows actions that formerly requested approval. Deployment configuration blocks `git push`; the plugin blocks `sudo` and protected edits. Legacy approval handlers remain. These controls are not a comprehensive security guarantee.
 
@@ -107,7 +107,7 @@ Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that
 
 ## Feature items
 
-- **CMD-1 Commands:** determine the supported command API on the pinned OpenCode release, map it to Slack, and verify effects in the correct project/session. Command syntax is not selected.
+- **CMD-1 Commands:** a mention whose text starts with `/init`, `/review`, `/model`, `/stop` or `/compact` is a command; any other leading `/` stays a prompt. `/init` and `/review` run OpenCode server commands in the thread's session. `/model` lists enabled models from the channel model's provider and switches only the thread's session; attachments are checked against the session's current model. `/stop` interrupts and `/compact` requests compaction. Verified with integration tests and against real OpenCode 2.0.15 with a scripted model; not yet checked in a development Slack workspace (Slack may reject thread replies starting with `/`, so commands are written after the mention).
 - **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, key proxy, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
 - **DEMO-1 Screenshot demos:** let the agent show that a feature works by driving a headless browser and posting screenshots or short recordings to the Slack thread, and later to the PR. See the proposal below.
 

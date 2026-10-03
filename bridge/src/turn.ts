@@ -1,5 +1,6 @@
-import { createSession, decide, inputsOf, pending, pluginReady, prompt, type AgentEvent, type Client, type Permission } from "./agent.ts"
+import { command, createSession, decide, inputsOf, pending, pluginReady, prompt, sessionModel, type AgentEvent, type Client, type Permission } from "./agent.ts"
 import { refusal, store, type SlackFile } from "./attachments.ts"
+import { commandOf, control, SERVER_COMMANDS } from "./commands.ts"
 import type { Channel, Config } from "./config.ts"
 import type { Approval, Db } from "./db.ts"
 
@@ -168,18 +169,25 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     if (!runtime.available) return say("The project environment is unavailable.")
 
     const { client, channel } = runtime
-    const inputs = m.files.length ? await inputsOf(client, channel.model) : []
-    const refused = m.files.map((file) => refusal(file, inputs, channel.model)).filter(Boolean)
+    const start = async (model: string) => {
+      const id = await createSession(client, channel.serverDir, model)
+      db.addThread({ team_id: m.teamId, channel_id: m.channelId, thread_ts: threadTs, session_id: id })
+      return id
+    }
+    const cmd = commandOf(m.text)
+    if (cmd && !SERVER_COMMANDS.has(cmd.name)) return say(await control(client, channel, cmd, thread?.session_id, start))
+
+    // The thread's session may have switched models, so check attachments against the model it uses now.
+    const model = m.files.length && thread ? await sessionModel(client, thread.session_id, channel.model) : channel.model
+    const inputs = m.files.length ? await inputsOf(client, model) : []
+    const refused = m.files.map((file) => refusal(file, inputs, model)).filter(Boolean)
     if (refused.length) return say(refused.join("\n"))
     const files = []
     for (const file of m.files) files.push(await store(channel, threadTs, file, slack.download))
 
-    let sessionId = thread?.session_id
-    if (!sessionId) {
-      sessionId = await createSession(client, channel.serverDir, channel.model)
-      db.addThread({ team_id: m.teamId, channel_id: m.channelId, thread_ts: threadTs, session_id: sessionId })
-    }
-    await prompt(client, sessionId, m.text.trim() || "The owner sent the attached files.", files)
+    const sessionId = thread?.session_id ?? (await start(channel.model))
+    if (cmd) await command(client, sessionId, cmd.name, cmd.args, files)
+    else await prompt(client, sessionId, m.text.trim() || "The owner sent the attached files.", files)
   }
 
   async function click(userId: string, decision: "once" | "reject", value: string, channelId: string, threadTs?: string) {
