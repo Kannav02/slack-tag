@@ -1,42 +1,72 @@
 import assert from "node:assert/strict"
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcessByStdio } from "node:child_process"
 import { once } from "node:events"
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
-import { createServer } from "node:http"
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
+import type { Readable } from "node:stream"
+import { text } from "node:stream/consumers"
 import { test } from "node:test"
 import { setTimeout as delay } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
-import { WebSocketServer } from "ws"
+import { WebSocketServer, type WebSocket } from "ws"
+import { z } from "zod"
 
 const root = fileURLToPath(new URL("../", import.meta.url))
+
+// Requests the bridge sends to the fake services; loose objects keep every field for the secret checks.
+const blockList = z.array(z.looseObject({ type: z.string(), text: z.unknown().optional(), elements: z.array(z.looseObject({ value: z.string() })).optional() }))
+const slackCall = z.looseObject({
+  channel: z.string().optional(),
+  user: z.string().optional(),
+  text: z.string().optional(),
+  ts: z.string().optional(),
+  thread_ts: z.string().optional(),
+  blocks: z.preprocess((value) => (typeof value === "string" ? JSON.parse(value) : value), blockList).optional(),
+})
+const sessionCall = z.looseObject({ location: z.object({ directory: z.string() }), model: z.object({ providerID: z.string(), id: z.string() }) })
+const promptCall = z.looseObject({ text: z.string(), delivery: z.string(), files: z.array(z.object({ uri: z.string(), name: z.string() })) })
+type Bridge = ChildProcessByStdio<null, Readable, Readable>
+
+function portOf(server: Server) {
+  const address = server.address()
+  assert.ok(address && typeof address === "object")
+  return address.port
+}
 
 // Start the production process, replace only external services, and inspect messages plus persisted state.
 test("Slack routing, queued prompts, Markdown replies, and session persistence", { timeout: 30_000 }, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-integration-"))
-  const messages = []
-  const sessions = []
-  const prompts = []
-  const unexpected = []
-  const fetched = []
-  const decisions = []
-  const streams = new Set()
-  let child, socket, stream, db
+  const messages: (z.infer<typeof slackCall> & { method: string | undefined; ts: string })[] = []
+  const sessions: (z.infer<typeof sessionCall> & { id: string })[] = []
+  const prompts: (z.infer<typeof promptCall> & { sessionID: string | undefined })[] = []
+  const unexpected: string[] = []
+  const fetched: { path: string; authorization: string | undefined }[] = []
+  const decisions: string[] = []
+  const streams = new Set<ServerResponse>()
+  let child: Bridge | undefined
+  let socket: WebSocket | undefined
+  let stream: ServerResponse | undefined
+  let db: DatabaseSync | undefined
   let logs = ""
   let sequence = 0
-  let base
+  let base = ""
 
-  const server = createServer(async (req, res) => {
-    const chunks = []
-    for await (const chunk of req) chunks.push(chunk)
-    const raw = Buffer.concat(chunks).toString()
-    const args = req.headers["content-type"]?.includes("json")
+  const server = createServer((req, res) => {
+    text(req)
+      .then((raw) => respond(req, res, raw))
+      .catch((error: unknown) => {
+        unexpected.push(error instanceof Error ? error.message : "request failed")
+        res.destroy()
+      })
+  })
+  function respond(req: IncomingMessage, res: ServerResponse, raw: string) {
+    const args: unknown = req.headers["content-type"]?.includes("json")
       ? JSON.parse(raw || "{}") : Object.fromEntries(new URLSearchParams(raw))
-    if (typeof args.blocks === "string") args.blocks = JSON.parse(args.blocks)
-    const path = new URL(req.url, base).pathname
-    const json = (value) => {
+    const path = new URL(req.url ?? "/", base).pathname
+    const json = (value: unknown) => {
       res.writeHead(200, { "content-type": "application/json" })
       res.end(JSON.stringify(value))
     }
@@ -53,7 +83,7 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
     if (path === "/files/redirect") return res.writeHead(302, { location: `${base.replace("127.0.0.1", "localhost")}/steal` }).end()
     if (path === "/api/model") return json({ data: [{ providerID: "test", id: "test", capabilities: { input: ["text"] } }] })
     if (/\/permission\/[^/]+/.test(path)) {
-      decisions.push({ path, ...args })
+      decisions.push(path)
       return json({})
     }
     if (path === "/api/rpc/slack-tag/status") return json({ output: { pluginVersion: "test", policyVersion: 2 } })
@@ -61,26 +91,27 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
     if (path === "/files/note.txt") return res.end("uploaded note")
     if (path === "/api/session" && req.method === "POST") {
       const id = `ses_test${sessions.length + 1}`
-      sessions.push({ id, ...args })
+      sessions.push({ id, ...sessionCall.parse(args) })
       return json({ data: { id } })
     }
     const prompt = path.match(/^\/api\/session\/([^/]+)\/prompt$/)
     if (prompt) {
-      prompts.push({ sessionID: prompt[1], ...args })
+      prompts.push({ sessionID: prompt[1], ...promptCall.parse(args) })
       return json({})
     }
     if (/^\/api\/session\/[^/]+\/permission$/.test(path)) return json({ data: [] })
     if (path === "/api/auth.test") return json({ ok: true, user_id: "UBOT", team_id: "TTEST" })
     if (path === "/api/apps.connections.open") return json({ ok: true, url: `${base.replace("http:", "ws:")}/socket` })
     if (["/api/chat.postMessage", "/api/chat.update", "/api/chat.postEphemeral"].includes(path)) {
-      const ts = args.ts ?? `200.${++sequence}`
-      messages.push({ method: path.split("/").at(-1), ...args, ts })
-      return json({ ok: true, ts, channel: args.channel })
+      const call = slackCall.parse(args)
+      const ts = call.ts ?? `200.${++sequence}`
+      messages.push({ method: path.split("/").at(-1), ...call, ts })
+      return json({ ok: true, ts, channel: call.channel })
     }
     unexpected.push(`${req.method} ${path}`)
     res.writeHead(404)
     res.end()
-  })
+  }
   const wss = new WebSocketServer({ server, path: "/socket" })
   wss.on("connection", (ws) => {
     socket = ws
@@ -101,13 +132,13 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
     for (const res of streams) res.end()
     wss.close()
     server.closeAllConnections()
-    await new Promise((resolve) => server.close(resolve))
+    await new Promise<void>((resolve) => server.close(() => resolve()))
     await rm(work, { recursive: true, force: true })
   })
-  async function until(check) {
+  async function until(check: () => unknown) {
     const deadline = Date.now() + 5000
     while (!check()) {
-      if (Date.now() > deadline) throw new Error(`Timed out waiting for bridge outcome.\n${logs}`)
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for bridge outcome.\n${logs}\n${unexpected.join("\n")}`)
       await delay(20)
     }
   }
@@ -128,22 +159,25 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
       },
       stdio: ["ignore", "pipe", "pipe"],
     })
-    child.stdout.on("data", (chunk) => { logs += chunk })
-    child.stderr.on("data", (chunk) => { logs += chunk })
+    child.stdout.on("data", (chunk: Buffer) => { logs += chunk.toString() })
+    child.stderr.on("data", (chunk: Buffer) => { logs += chunk.toString() })
     await until(() => socket && stream && logs.includes("bridge connected"))
   }
-  function send(event, team = "TTEST") {
+  function send(event: Record<string, unknown>, team = "TTEST") {
     const id = `event-${++sequence}`
+    assert.ok(socket)
     socket.send(JSON.stringify({
       envelope_id: id, type: "events_api", accepts_response_payload: false,
       payload: { type: "event_callback", team_id: team, api_app_id: "ATEST", event_id: id,
         event: { type: "message", channel: "CTEST", user: "UOWNER", text: "<@UBOT> start", ...event } },
     }))
   }
-  function emit(type, sessionID, delta, data = { sessionID, delta }) {
+  function emit(type: string, sessionID: string, delta?: string, data: object = { sessionID, delta }) {
+    assert.ok(stream)
     stream.write(`data: ${JSON.stringify({ type, data })}\n\n`)
   }
-  function click(value, { team = "TTEST", thread = "100.3" } = {}) {
+  function click(value: string, { team = "TTEST", thread = "100.3" }: { team?: string; thread?: string } = {}) {
+    assert.ok(socket)
     socket.send(JSON.stringify({
       envelope_id: `click-${++sequence}`, type: "interactive", accepts_response_payload: false,
       payload: { type: "block_actions", team: { id: team }, user: { id: "UOWNER" }, api_app_id: "ATEST", token: "t", trigger_id: "t",
@@ -152,8 +186,8 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
     }))
   }
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
-  base = `http://127.0.0.1:${server.address().port}`
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()))
+  base = `http://127.0.0.1:${portOf(server)}`
   // The agent controls the project folder: point the old inbox and .git/info/exclude outside it.
   const project = join(work, "project")
   const state = join(work, "state")
@@ -170,12 +204,13 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
     channels: { CTEST: { name: "test", projectDir: project, serverDir: "/project", opencodeUrl: base, passwordEnv: "TEST_SERVER_PASSWORD", model: "test/test" } },
   }))
   await start()
-  db = new DatabaseSync(join(state, "slack-tag.sqlite"), { readOnly: true })
+  const store = new DatabaseSync(join(state, "slack-tag.sqlite"), { readOnly: true })
+  db = store
 
   send({ ts: "100.1", user: "UOTHER" })
   await until(() => messages.some((m) => m.method === "chat.postEphemeral"))
-  assert.equal(messages[0].user, "UOTHER")
-  assert.match(messages[0].text, /Only the owner/)
+  assert.equal(messages[0]?.user, "UOTHER")
+  assert.match(messages[0]?.text ?? "", /Only the owner/)
   assert.equal(sessions.length, 0)
   assert.equal(prompts.length, 0)
 
@@ -185,24 +220,26 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
 
   send({ ts: "100.3" })
   await until(() => prompts.length === 1)
-  assert.equal(sessions[0].location.directory, "/project")
-  assert.deepEqual(sessions[0].model, { providerID: "test", id: "test" })
-  const sessionID = sessions[0].id
-  assert.equal(prompts[0].text, "start")
-  assert.equal(prompts[0].delivery, "queue")
+  assert.equal(sessions[0]?.location.directory, "/project")
+  assert.deepEqual(sessions[0]?.model, { providerID: "test", id: "test" })
+  const sessionID = sessions[0]?.id ?? ""
+  assert.equal(prompts[0]?.text, "start")
+  assert.equal(prompts[0]?.delivery, "queue")
 
   const sample = "# Heading\n\n**bold** and `inline`\n- item\n[link](https://example.com)\n```js\nconst n = 1\n```\nxoxb-synthetic-secret"
   const expected = sample.replace("xoxb-synthetic-secret", "[redacted]")
   emit("session.text.delta", sessionID, sample)
   await until(() => messages.some((m) => m.thread_ts === "100.3" && m.blocks))
   const first = messages.find((m) => m.thread_ts === "100.3" && m.blocks)
+  assert.ok(first)
   assert.equal(first.text, expected)
   assert.deepEqual(first.blocks, [{ type: "markdown", text: expected }])
 
   emit("session.text.delta", sessionID, "\nFinal xapp-synthetic-secret")
   emit("session.execution.succeeded", sessionID)
-  await until(() => db.prepare("SELECT state FROM replies WHERE message_ts = ?").get(first.ts)?.state === "done")
+  await until(() => store.prepare("SELECT state FROM replies WHERE message_ts = ?").get(first.ts)?.state === "done")
   const last = messages.filter((m) => m.ts === first.ts).at(-1)
+  assert.ok(last)
   assert.equal(last.method, "chat.update")
   assert.equal(last.text, `${expected}\nFinal [redacted]`)
   assert.deepEqual(last.blocks, [{ type: "markdown", text: last.text }])
@@ -210,20 +247,20 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
 
   send({ ts: "100.4", thread_ts: "100.3", text: "continue without a mention" })
   await until(() => prompts.length === 2)
-  assert.equal(prompts[1].sessionID, sessionID)
-  assert.equal(prompts[1].delivery, "queue")
+  assert.equal(prompts[1]?.sessionID, sessionID)
+  assert.equal(prompts[1]?.delivery, "queue")
   assert.equal(sessions.length, 1)
   send({ ts: "100.5" })
   await until(() => prompts.length === 3)
-  assert.notEqual(prompts[2].sessionID, sessionID)
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM threads").get().n, 2)
+  assert.notEqual(prompts[2]?.sessionID, sessionID)
+  assert.equal(store.prepare("SELECT COUNT(*) AS n FROM threads").get()?.n, 2)
 
   await stop()
   await start()
   send({ ts: "100.6", thread_ts: "100.3", text: "continue after restart" })
   await until(() => prompts.length === 4)
-  assert.equal(prompts[3].sessionID, sessionID)
-  assert.equal(prompts[3].text, "continue after restart")
+  assert.equal(prompts[3]?.sessionID, sessionID)
+  assert.equal(prompts[3]?.text, "continue after restart")
   assert.equal(sessions.length, 2)
 
   // Another workspace's event is ignored.
@@ -238,20 +275,22 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   emit("session.text.delta", sessionID, "<!channel> <!here|here> @everyone pw-synthetic-secret")
   emit("session.execution.succeeded", sessionID)
   await until(() => messages.some((m) => m.thread_ts === "100.3" && m.text?.includes("everyone")))
-  const loudTs = messages.find((m) => m.thread_ts === "100.3" && m.text?.includes("everyone")).ts
+  const loudTs = messages.find((m) => m.thread_ts === "100.3" && m.text?.includes("everyone"))?.ts
   const loud = messages.findLast((m) => m.ts === loudTs)
+  assert.ok(loud)
   assert.equal(loud.text, "@\u200bchannel @\u200bhere @\u200beveryone [redacted]")
   assert.deepEqual(loud.blocks, [{ type: "markdown", text: loud.text }])
 
   // The bot token goes only to the Slack files origin, without following redirects elsewhere.
-  const file = (url_private) => [{ name: "a.txt", mimetype: "text/plain", size: 2, url_private }]
+  const file = (url_private: string) => [{ name: "a.txt", mimetype: "text/plain", size: 2, url_private }]
   send({ ts: "100.9", files: file(`${base}/files/ok.txt`) })
   await until(() => prompts.length === 6)
-  assert.equal(prompts[5].files.length, 1)
-  for (const [ts, url] of [["100.10", `${base.replace("127.0.0.1", "localhost")}/steal`], ["100.11", `${base}/files/redirect`]]) {
+  assert.equal(prompts[5]?.files.length, 1)
+  const refused: [string, string][] = [["100.10", `${base.replace("127.0.0.1", "localhost")}/steal`], ["100.11", `${base}/files/redirect`]]
+  for (const [ts, url] of refused) {
     send({ ts, files: file(url) })
     await until(() => messages.some((m) => m.thread_ts === ts))
-    assert.equal(messages.find((m) => m.thread_ts === ts).text, "The request failed. The details are in the bridge log.")
+    assert.equal(messages.find((m) => m.thread_ts === ts)?.text, "The request failed. The details are in the bridge log.")
   }
   assert.deepEqual(fetched, [
     { path: "/files/ok.txt", authorization: "Bearer xoxb-test" },
@@ -262,7 +301,8 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   // Approval clicks must be well formed, from this workspace, and in the asking thread.
   emit("permission.asked", sessionID, undefined, { id: "per_1", sessionID, action: "shell", resources: ["rm -rf x"] })
   await until(() => messages.some((m) => m.blocks?.[1]?.elements))
-  const value = messages.find((m) => m.blocks?.[1]?.elements).blocks[1].elements[0].value
+  const value = messages.find((m) => m.blocks?.[1]?.elements)?.blocks?.[1]?.elements?.[0]?.value
+  assert.ok(value)
   click("{oops")
   click(value, { team: "TOTHER" })
   click(value, { thread: "100.5" })
@@ -272,14 +312,14 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   assert.match(logs, /click ignored: malformed button value/)
   click(value)
   await until(() => decisions.length === 1)
-  assert.match(decisions[0].path, /per_1/)
+  assert.match(decisions[0] ?? "", /per_1/)
   assert.ok(!JSON.stringify(messages).includes("synthetic-secret"))
 
   // Uploads land in the bridge-owned inbox, not through the agent's symlinks.
   const note = { name: "note.txt", mimetype: "text/plain", size: 13, url_private: `${base}/files/note.txt` }
   send({ ts: "100.12", thread_ts: "100.3", subtype: "file_share", text: "read this", files: [note] })
   await until(() => prompts.length === 7)
-  assert.deepEqual(prompts[6].files, [{ uri: "file:///inbox/100.3/note.txt", name: "note.txt" }])
+  assert.deepEqual(prompts[6]?.files, [{ uri: "file:///inbox/100.3/note.txt", name: "note.txt" }])
   assert.equal(await readFile(join(state, "inbox", "test", "100.3", "note.txt"), "utf8"), "uploaded note")
   assert.deepEqual(await readdir(outside), ["victim.txt"])
   assert.equal(await readFile(join(outside, "victim.txt"), "utf8"), "untouched")
@@ -289,8 +329,8 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
 // Two fake OpenCode servers record which password reached them; Slack is never reached.
 test("each channel's server gets its own password, and a reused password stops startup", { timeout: 20_000 }, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-passwords-"))
-  const seen = { A: [], B: [] }
-  const servers = await Promise.all(Object.keys(seen).map(async (name) => {
+  const seen: Record<"A" | "B", string[]> = { A: [], B: [] }
+  const servers = await Promise.all((["A", "B"] as const).map(async (name) => {
     const server = createServer((req, res) => {
       seen[name].push(Buffer.from((req.headers.authorization ?? "").replace("Basic ", ""), "base64").toString())
       res.writeHead(401).end()
@@ -304,9 +344,9 @@ test("each channel's server gets its own password, and a reused password stops s
     await rm(work, { recursive: true, force: true })
   })
   await mkdir(join(work, "state"))
-  const channel = (name, server) => ({ name, projectDir: join(work, "project"), opencodeUrl: `http://127.0.0.1:${server.address().port}`, passwordEnv: `${name}_PASSWORD`, model: "test/test" })
+  const channel = (name: string, server: Server | undefined) => ({ name, projectDir: join(work, "project"), opencodeUrl: `http://127.0.0.1:${server ? portOf(server) : 9}`, passwordEnv: `${name}_PASSWORD`, model: "test/test" })
   await writeFile(join(work, "state", "config.json"), JSON.stringify({ ownerUserId: "UOWNER", channels: { CA: channel("A", servers[0]), CB: channel("B", servers[1]) } }))
-  async function run(passwords) {
+  async function run(passwords: Record<string, string>) {
     const child = spawn(process.execPath, ["--experimental-strip-types", "--experimental-sqlite", join(root, "bridge/src/main.ts")], {
       cwd: root,
       env: { PATH: process.env.PATH, HOME: work, SLACK_TAG_CONFIG: join(work, "state", "config.json"), SLACK_API_URL: "http://127.0.0.1:9/api/",
@@ -314,8 +354,8 @@ test("each channel's server gets its own password, and a reused password stops s
       stdio: ["ignore", "pipe", "pipe"],
     })
     let logs = ""
-    child.stdout.on("data", (chunk) => { logs += chunk })
-    child.stderr.on("data", (chunk) => { logs += chunk })
+    child.stdout.on("data", (chunk: Buffer) => { logs += chunk.toString() })
+    child.stderr.on("data", (chunk: Buffer) => { logs += chunk.toString() })
     const exit = once(child, "exit")
     for (let i = 0; i < 100 && child.exitCode === null && !logs.includes("channel CB"); i++) await delay(50)
     child.kill()
@@ -348,9 +388,9 @@ test("a project folder that is /, holds, or sits inside the bridge state folder 
       stdio: ["ignore", "pipe", "pipe"],
     })
     let logs = ""
-    child.stderr.on("data", (chunk) => { logs += chunk })
-    const [code] = await once(child, "exit")
-    assert.notEqual(code, 0)
+    child.stderr.on("data", (chunk: Buffer) => { logs += chunk.toString() })
+    await once(child, "exit")
+    assert.notEqual(child.exitCode, 0)
     assert.match(logs, /channel CA projectDir must not be \/, contain, or sit inside/)
   }
 })
