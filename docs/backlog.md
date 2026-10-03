@@ -6,7 +6,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 
 | ID | Item | Priority | State |
 | --- | --- | --- | --- |
-| SEC-1 | Attachment writes cannot escape the project | High | Planned |
+| SEC-1 | Attachment writes cannot escape the project | High | Done (inbox outside project) |
 | SEC-2 | Destructive actions ask the owner and fail closed | High | Planned |
 | SEC-3 | Slack input and output hardening | High | Planned |
 | SEC-4 | Bridge runs as a dedicated restricted user | High | Planned (needs VPS) |
@@ -30,6 +30,8 @@ Source: a read-only code audit on 2026-09-29. The VPS was not inspected. "Proven
 Threat model: treat the agent as untrusted. It reads project files, web pages and attachments that may contain injected instructions, and it runs almost every command without approval. Each item asks what a misbehaving agent (or, later, a non-owner Slack user) could reach.
 
 ### SEC-1: Attachment writes cannot escape the project
+
+**Done:** uploads go to `<state dir>/inbox/<channel name>/<thread_ts>/`, owned by the bridge and mounted read-only at `/inbox` in the container. The bridge no longer writes into the project or `.git/info/exclude`, refuses a symlinked inbox folder, and refuses a `projectDir` that is `/`, holds, or sits inside the state folder. Verified by integration tests (a symlinked old inbox and `.git/info/exclude` stay untouched) and a Docker Desktop check that `/inbox` is read-only; not yet on the VPS.
 
 **Background:** The bridge runs on the VPS host, not in a container. For owner uploads, `store()` in `bridge/src/attachments.ts` writes into `<projectDir>/.slack-tag/inbox/<thread_ts>/` and appends `.slack-tag/` to `<projectDir>/.git/info/exclude`. The agent's container mounts the same project folder read-write, and `deploy/prepare-project.sh` makes the inbox writable by the container user.
 

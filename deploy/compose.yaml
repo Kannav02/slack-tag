@@ -47,6 +47,8 @@ services:
       - ${ALPHA_PROJECT}/opencode.jsonc:/project/opencode.jsonc:ro
       - ${ALPHA_PROJECT}/.git/hooks:/project/.git/hooks:ro
       - ${ALPHA_PROJECT}/.git/config:/project/.git/config:ro
+      # Slack uploads, written by the bridge. Create it before the first start (docs/deploy.md).
+      - ${ALPHA_INBOX:-/var/lib/slack-tag/inbox/alpha}:/inbox:ro
 
   # Copy this service for each further channel, with its own port, project, env file, network, and data volume.
   beta:
@@ -63,6 +65,7 @@ services:
       - ${BETA_PROJECT:-/nonexistent}/opencode.jsonc:/project/opencode.jsonc:ro
       - ${BETA_PROJECT:-/nonexistent}/.git/hooks:/project/.git/hooks:ro
       - ${BETA_PROJECT:-/nonexistent}/.git/config:/project/.git/config:ro
+      - ${BETA_INBOX:-/var/lib/slack-tag/inbox/beta}:/inbox:ro
 
 volumes:
   alpha-data:

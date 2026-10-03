@@ -119,3 +119,7 @@ The private `gem-research-suite` channel in Kannav Work maps to `/home/devuser/p
 ## Per-project server passwords and networks (2026-10-01)
 
 Ran the branch's `deploy/compose.yaml` on Docker Desktop with `alpha`, `beta` and `key-proxy`, each project with its own env file. Each server accepted only its own password (200) and rejected the other's (401). From `alpha`, `beta` did not resolve by name and timed out by IP; both projects reached `key-proxy`. The `alpha` process environment did not contain `beta`'s password. The real bridge reported both channels ready with the right passwords and both unavailable when swapped. Not verified on the VPS, with gVisor, or through real Slack.
+
+## Separate upload inbox (2026-10-02)
+
+On Docker Desktop, `alpha` from this branch's `compose.yaml` mounted the host inbox at `/inbox` read-only: the agent's user could list and read an upload, but creating a file or replacing the thread folder failed with "Read-only file system", and the project folder had no `.slack-tag/`. Integration tests show uploads land in `<state>/inbox/<channel>/<thread>/` and reach OpenCode as `file:///inbox/<thread>/<name>`; symlinks the agent plants at the old `.slack-tag/inbox` and `.git/info/exclude` receive no writes. Not verified on the VPS or with a real model reading the upload.
