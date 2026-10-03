@@ -1,6 +1,6 @@
 import { createWriteStream } from "node:fs"
-import { appendFile, mkdir, readFile, readdir, rm } from "node:fs/promises"
-import { basename, join, resolve, sep } from "node:path"
+import { lstat, mkdir, readdir, rm } from "node:fs/promises"
+import { basename, dirname, join, resolve, sep } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { pathToFileURL } from "node:url"
@@ -43,23 +43,24 @@ function freeName(name: string, taken: string[]): string {
   return candidate
 }
 
-async function excludeInbox(projectDir: string) {
-  const exclude = join(projectDir, ".git", "info", "exclude")
-  const current = await readFile(exclude, "utf8").catch(() => undefined)
-  if (current === undefined || current.split("\n").includes(".slack-tag/")) return
-  await appendFile(exclude, (current && !current.endsWith("\n") ? "\n" : "") + ".slack-tag/\n")
+// The inbox belongs to the bridge and is read-only in the container, but still never follow a symlink into it.
+async function realDir(path: string) {
+  await mkdir(path, { recursive: true, mode: 0o755 })
+  const info = await lstat(path)
+  if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("attachment inbox is not a plain directory")
 }
 
 export async function store(
-  dirs: { projectDir: string; serverDir: string },
+  dirs: { inboxDir: string; serverInboxDir: string },
   threadTs: string,
   file: SlackFile,
   download: (url: string) => Promise<Response>,
 ): Promise<{ uri: string; name: string }> {
-  const rel = join(".slack-tag", "inbox", threadTs.replace(/[^0-9.]/g, ""))
-  const inbox = resolve(dirs.projectDir, rel)
-  await mkdir(inbox, { recursive: true })
-  await excludeInbox(dirs.projectDir)
+  const thread = /^\d+\.\d+$/.test(threadTs) ? threadTs : "thread"
+  const inbox = join(dirs.inboxDir, thread)
+  await realDir(dirname(dirs.inboxDir))
+  await realDir(dirs.inboxDir)
+  await realDir(inbox)
   const name = freeName(leaf(file.name), await readdir(inbox))
   const dest = resolve(inbox, name)
   if (!dest.startsWith(inbox + sep)) throw new Error("attachment path escapes the inbox")
@@ -79,5 +80,5 @@ export async function store(
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") await rm(dest, { force: true })
     throw error
   }
-  return { uri: pathToFileURL(join(dirs.serverDir, rel, name)).href, name }
+  return { uri: pathToFileURL(join(dirs.serverInboxDir, thread, name)).href, name }
 }

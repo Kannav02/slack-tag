@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
 import { once } from "node:events"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -57,6 +57,8 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
       return json({})
     }
     if (path === "/api/rpc/slack-tag/status") return json({ output: { pluginVersion: "test", policyVersion: 2 } })
+    if (path === "/api/model") return json({ data: [{ providerID: "test", id: "test", capabilities: { input: ["text"] } }] })
+    if (path === "/files/note.txt") return res.end("uploaded note")
     if (path === "/api/session" && req.method === "POST") {
       const id = `ses_test${sessions.length + 1}`
       sessions.push({ id, ...args })
@@ -117,7 +119,7 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
       env: {
         PATH: process.env.PATH,
         HOME: work,
-        SLACK_TAG_CONFIG: join(work, "config.json"),
+        SLACK_TAG_CONFIG: join(state, "config.json"),
         SLACK_API_URL: `${base}/api/`,
         SLACK_BOT_TOKEN: "xoxb-test",
         SLACK_APP_TOKEN: "xapp-test",
@@ -152,12 +154,23 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   base = `http://127.0.0.1:${server.address().port}`
-  await writeFile(join(work, "config.json"), JSON.stringify({
+  // The agent controls the project folder: point the old inbox and .git/info/exclude outside it.
+  const project = join(work, "project")
+  const state = join(work, "state")
+  await mkdir(state)
+  const outside = join(work, "outside")
+  await mkdir(join(project, ".slack-tag"), { recursive: true })
+  await mkdir(join(project, ".git", "info"), { recursive: true })
+  await mkdir(outside)
+  await writeFile(join(outside, "victim.txt"), "untouched")
+  await symlink(outside, join(project, ".slack-tag", "inbox"))
+  await symlink(join(outside, "victim.txt"), join(project, ".git", "info", "exclude"))
+  await writeFile(join(state, "config.json"), JSON.stringify({
     ownerUserId: "UOWNER",
-    channels: { CTEST: { name: "test", projectDir: work, serverDir: "/project", opencodeUrl: base, passwordEnv: "TEST_SERVER_PASSWORD", model: "test/test" } },
+    channels: { CTEST: { name: "test", projectDir: project, serverDir: "/project", opencodeUrl: base, passwordEnv: "TEST_SERVER_PASSWORD", model: "test/test" } },
   }))
   await start()
-  db = new DatabaseSync(join(work, "slack-tag.sqlite"), { readOnly: true })
+  db = new DatabaseSync(join(state, "slack-tag.sqlite"), { readOnly: true })
 
   send({ ts: "100.1", user: "UOTHER" })
   await until(() => messages.some((m) => m.method === "chat.postEphemeral"))
@@ -261,6 +274,15 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   await until(() => decisions.length === 1)
   assert.match(decisions[0].path, /per_1/)
   assert.ok(!JSON.stringify(messages).includes("synthetic-secret"))
+
+  // Uploads land in the bridge-owned inbox, not through the agent's symlinks.
+  const note = { name: "note.txt", mimetype: "text/plain", size: 13, url_private: `${base}/files/note.txt` }
+  send({ ts: "100.12", thread_ts: "100.3", subtype: "file_share", text: "read this", files: [note] })
+  await until(() => prompts.length === 7)
+  assert.deepEqual(prompts[6].files, [{ uri: "file:///inbox/100.3/note.txt", name: "note.txt" }])
+  assert.equal(await readFile(join(state, "inbox", "test", "100.3", "note.txt"), "utf8"), "uploaded note")
+  assert.deepEqual(await readdir(outside), ["victim.txt"])
+  assert.equal(await readFile(join(outside, "victim.txt"), "utf8"), "untouched")
   assert.deepEqual(unexpected, [])
 })
 
@@ -281,12 +303,13 @@ test("each channel's server gets its own password, and a reused password stops s
     for (const server of servers) server.close()
     await rm(work, { recursive: true, force: true })
   })
-  const channel = (name, server) => ({ name, projectDir: work, opencodeUrl: `http://127.0.0.1:${server.address().port}`, passwordEnv: `${name}_PASSWORD`, model: "test/test" })
-  await writeFile(join(work, "config.json"), JSON.stringify({ ownerUserId: "UOWNER", channels: { CA: channel("A", servers[0]), CB: channel("B", servers[1]) } }))
+  await mkdir(join(work, "state"))
+  const channel = (name, server) => ({ name, projectDir: join(work, "project"), opencodeUrl: `http://127.0.0.1:${server.address().port}`, passwordEnv: `${name}_PASSWORD`, model: "test/test" })
+  await writeFile(join(work, "state", "config.json"), JSON.stringify({ ownerUserId: "UOWNER", channels: { CA: channel("A", servers[0]), CB: channel("B", servers[1]) } }))
   async function run(passwords) {
     const child = spawn(process.execPath, ["--experimental-strip-types", "--experimental-sqlite", join(root, "bridge/src/main.ts")], {
       cwd: root,
-      env: { PATH: process.env.PATH, HOME: work, SLACK_TAG_CONFIG: join(work, "config.json"), SLACK_API_URL: "http://127.0.0.1:9/api/",
+      env: { PATH: process.env.PATH, HOME: work, SLACK_TAG_CONFIG: join(work, "state", "config.json"), SLACK_API_URL: "http://127.0.0.1:9/api/",
         SLACK_BOT_TOKEN: "xoxb-test", SLACK_APP_TOKEN: "xapp-test", ...passwords },
       stdio: ["ignore", "pipe", "pipe"],
     })
@@ -308,4 +331,26 @@ test("each channel's server gets its own password, and a reused password stops s
   assert.match(await run({ A_PASSWORD: "same", B_PASSWORD: "same" }), /channel CB reuses another channel's server password/)
   assert.match(await run({ A_PASSWORD: "only-a" }), /B_PASSWORD is required/)
   assert.deepEqual(seen.B, [])
+})
+
+test("a project folder that is /, holds, or sits inside the bridge state folder stops startup", { timeout: 20_000 }, async (t) => {
+  const work = await mkdtemp(join(tmpdir(), "slack-tag-projectdir-"))
+  const state = join(work, "state")
+  await mkdir(state)
+  t.after(() => rm(work, { recursive: true, force: true }))
+  for (const projectDir of ["/", work, state, join(state, "project")]) {
+    await writeFile(join(state, "config.json"), JSON.stringify({ ownerUserId: "UOWNER", channels: {
+      CA: { name: "a", projectDir, opencodeUrl: "http://127.0.0.1:9", passwordEnv: "A_PASSWORD", model: "test/test" } } }))
+    const child = spawn(process.execPath, ["--experimental-strip-types", "--experimental-sqlite", join(root, "bridge/src/main.ts")], {
+      cwd: root,
+      env: { PATH: process.env.PATH, HOME: work, SLACK_TAG_CONFIG: join(state, "config.json"), A_PASSWORD: "a",
+        SLACK_BOT_TOKEN: "xoxb-test", SLACK_APP_TOKEN: "xapp-test" },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let logs = ""
+    child.stderr.on("data", (chunk) => { logs += chunk })
+    const [code] = await once(child, "exit")
+    assert.notEqual(code, 0)
+    assert.match(logs, /channel CA projectDir must not be \/, contain, or sit inside/)
+  }
 })
