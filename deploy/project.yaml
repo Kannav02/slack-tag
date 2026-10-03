@@ -1,0 +1,66 @@
+# One project registered from Slack. The bridge runs it as
+#   docker compose -p slack-tag-<name> -f deploy/project.yaml --env-file <state dir>/projects/<name>.env up -d
+# so each project gets its own container, key proxy, data volume and network. Keep the settings below in step with compose.yaml.
+# SLACK_TAG_NET (1-254, from the env file) numbers this project's network: subnet 172.31.<net>.0/24, bridge st-reg-<net>.
+services:
+  # This project's own copy of the key proxy, so registered projects never share a network.
+  key-proxy:
+    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.0.15}
+    pull_policy: never
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 64
+    env_file: ${PROXY_ENV_FILE:-/etc/slack-tag/proxy.env}
+    command: ["node", "--experimental-strip-types", "/opt/slack-tag/proxy/key-proxy.ts"]
+    networks:
+      project: { ipv4_address: "172.31.${SLACK_TAG_NET:?set SLACK_TAG_NET}.2" }
+
+  # Runs under gVisor. Set SLACK_TAG_RUNTIME=runc only where gVisor cannot be installed.
+  opencode:
+    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.0.15}
+    pull_policy: never
+    runtime: ${SLACK_TAG_RUNTIME:-runsc}
+    restart: unless-stopped
+    # start-server drops to node (uid 1000); agent-shell drops agent shells to agent (uid 1001).
+    user: "0:0"
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    pids_limit: 512
+    # The real Go key lives only in key-proxy. The password is this project's own, from its env file.
+    environment:
+      OPENCODE_API_KEY: unused
+      OPENCODE_SERVER_PASSWORD: ${SLACK_TAG_PASSWORD:?set SLACK_TAG_PASSWORD}
+    depends_on: [key-proxy]
+    tmpfs: [/tmp]
+    networks: [project]
+    # gVisor cannot use Docker's built-in DNS, so key-proxy is found by its fixed address.
+    extra_hosts: ["key-proxy:172.31.${SLACK_TAG_NET}.2"]
+    ports: ["127.0.0.1:${SLACK_TAG_PORT:?set SLACK_TAG_PORT}:4096"]
+    volumes:
+      - ${SLACK_TAG_PROJECT:?set SLACK_TAG_PROJECT}:/project
+      - data:/data
+      - ./resolv.conf:/etc/resolv.conf:ro
+      - ${SLACK_TAG_PROJECT}/.opencode:/project/.opencode:ro
+      - ${SLACK_TAG_PROJECT}/opencode.json:/project/opencode.json:ro
+      - ${SLACK_TAG_PROJECT}/opencode.jsonc:/project/opencode.jsonc:ro
+      - ${SLACK_TAG_PROJECT}/.git/hooks:/project/.git/hooks:ro
+      - ${SLACK_TAG_PROJECT}/.git/config:/project/.git/config:ro
+      # Slack uploads, written by the bridge; it passes SLACK_TAG_INBOX when it starts the project.
+      - ${SLACK_TAG_INBOX:?set SLACK_TAG_INBOX}:/inbox:ro
+
+volumes:
+  data:
+
+# The st- bridge name puts this network under deploy/firewall.sh (no host or metadata access).
+networks:
+  project:
+    driver_opts: { com.docker.network.bridge.name: "st-reg-${SLACK_TAG_NET}" }
+    ipam: { config: [{ subnet: "172.31.${SLACK_TAG_NET}.0/24" }] }

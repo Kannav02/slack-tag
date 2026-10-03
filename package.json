@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "check:dependencies": "node scripts/check-dependencies.ts",
-    "test": "node --test tests/*.test.ts",
+    "test": "node --test tests/*.test.*",
     "check": "npm run check:dependencies && npm run typecheck && npm test"
   },
   "devDependencies": {
