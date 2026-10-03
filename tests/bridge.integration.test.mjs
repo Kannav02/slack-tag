@@ -20,6 +20,8 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   const sessions = []
   const prompts = []
   const unexpected = []
+  const fetched = []
+  const decisions = []
   const streams = new Set()
   let child, socket, stream, db
   let logs = ""
@@ -45,6 +47,14 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
       res.writeHead(200, { "content-type": "text/event-stream" })
       res.flushHeaders()
       return
+    }
+    if (path.startsWith("/files/") || path === "/steal") fetched.push({ path, authorization: req.headers.authorization })
+    if (path === "/files/ok.txt") return res.end("ok")
+    if (path === "/files/redirect") return res.writeHead(302, { location: `${base.replace("127.0.0.1", "localhost")}/steal` }).end()
+    if (path === "/api/model") return json({ data: [{ providerID: "test", id: "test", capabilities: { input: ["text"] } }] })
+    if (/\/permission\/[^/]+/.test(path)) {
+      decisions.push({ path, ...args })
+      return json({})
     }
     if (path === "/api/rpc/slack-tag/status") return json({ output: { pluginVersion: "test", policyVersion: 2 } })
     if (path === "/api/session" && req.method === "POST") {
@@ -111,7 +121,8 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
         SLACK_API_URL: `${base}/api/`,
         SLACK_BOT_TOKEN: "xoxb-test",
         SLACK_APP_TOKEN: "xapp-test",
-        TEST_SERVER_PASSWORD: "test",
+        SLACK_FILES_URL: `${base}/files`,
+        TEST_SERVER_PASSWORD: "pw-synthetic-secret",
       },
       stdio: ["ignore", "pipe", "pipe"],
     })
@@ -119,16 +130,24 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
     child.stderr.on("data", (chunk) => { logs += chunk })
     await until(() => socket && stream && logs.includes("bridge connected"))
   }
-  function send(event) {
+  function send(event, team = "TTEST") {
     const id = `event-${++sequence}`
     socket.send(JSON.stringify({
       envelope_id: id, type: "events_api", accepts_response_payload: false,
-      payload: { type: "event_callback", team_id: "TTEST", api_app_id: "ATEST", event_id: id,
+      payload: { type: "event_callback", team_id: team, api_app_id: "ATEST", event_id: id,
         event: { type: "message", channel: "CTEST", user: "UOWNER", text: "<@UBOT> start", ...event } },
     }))
   }
-  function emit(type, sessionID, delta) {
-    stream.write(`data: ${JSON.stringify({ type, data: { sessionID, delta } })}\n\n`)
+  function emit(type, sessionID, delta, data = { sessionID, delta }) {
+    stream.write(`data: ${JSON.stringify({ type, data })}\n\n`)
+  }
+  function click(value, { team = "TTEST", thread = "100.3" } = {}) {
+    socket.send(JSON.stringify({
+      envelope_id: `click-${++sequence}`, type: "interactive", accepts_response_payload: false,
+      payload: { type: "block_actions", team: { id: team }, user: { id: "UOWNER" }, api_app_id: "ATEST", token: "t", trigger_id: "t",
+        channel: { id: "CTEST" }, message: { ts: "200.99", thread_ts: thread }, container: { type: "message" },
+        actions: [{ type: "button", action_id: "approve", block_id: "b", value, action_ts: "1" }] },
+    }))
   }
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
@@ -193,6 +212,55 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   assert.equal(prompts[3].sessionID, sessionID)
   assert.equal(prompts[3].text, "continue after restart")
   assert.equal(sessions.length, 2)
+
+  // Another workspace's event is ignored.
+  send({ ts: "100.7" }, "TOTHER")
+  send({ ts: "100.8" })
+  await until(() => prompts.length === 5)
+  await delay(200)
+  assert.equal(prompts.length, 5)
+  assert.equal(sessions.length, 3)
+
+  // Server passwords are redacted and broadcasts neutralised in agent output.
+  emit("session.text.delta", sessionID, "<!channel> <!here|here> @everyone pw-synthetic-secret")
+  emit("session.execution.succeeded", sessionID)
+  await until(() => messages.some((m) => m.thread_ts === "100.3" && m.text?.includes("everyone")))
+  const loudTs = messages.find((m) => m.thread_ts === "100.3" && m.text?.includes("everyone")).ts
+  const loud = messages.findLast((m) => m.ts === loudTs)
+  assert.equal(loud.text, "@\u200bchannel @\u200bhere @\u200beveryone [redacted]")
+  assert.deepEqual(loud.blocks, [{ type: "markdown", text: loud.text }])
+
+  // The bot token goes only to the Slack files origin, without following redirects elsewhere.
+  const file = (url_private) => [{ name: "a.txt", mimetype: "text/plain", size: 2, url_private }]
+  send({ ts: "100.9", files: file(`${base}/files/ok.txt`) })
+  await until(() => prompts.length === 6)
+  assert.equal(prompts[5].files.length, 1)
+  for (const [ts, url] of [["100.10", `${base.replace("127.0.0.1", "localhost")}/steal`], ["100.11", `${base}/files/redirect`]]) {
+    send({ ts, files: file(url) })
+    await until(() => messages.some((m) => m.thread_ts === ts))
+    assert.equal(messages.find((m) => m.thread_ts === ts).text, "The request failed. The details are in the bridge log.")
+  }
+  assert.deepEqual(fetched, [
+    { path: "/files/ok.txt", authorization: "Bearer xoxb-test" },
+    { path: "/files/redirect", authorization: "Bearer xoxb-test" },
+  ])
+  assert.match(logs, /refused to download from localhost/)
+
+  // Approval clicks must be well formed, from this workspace, and in the asking thread.
+  emit("permission.asked", sessionID, undefined, { id: "per_1", sessionID, action: "shell", resources: ["rm -rf x"] })
+  await until(() => messages.some((m) => m.blocks?.[1]?.elements))
+  const value = messages.find((m) => m.blocks?.[1]?.elements).blocks[1].elements[0].value
+  click("{oops")
+  click(value, { team: "TOTHER" })
+  click(value, { thread: "100.5" })
+  await until(() => messages.some((m) => m.text === "This button does not belong to this thread."))
+  await delay(200)
+  assert.deepEqual(decisions, [])
+  assert.match(logs, /click ignored: malformed button value/)
+  click(value)
+  await until(() => decisions.length === 1)
+  assert.match(decisions[0].path, /per_1/)
+  assert.ok(!JSON.stringify(messages).includes("synthetic-secret"))
   assert.deepEqual(unexpected, [])
 })
 

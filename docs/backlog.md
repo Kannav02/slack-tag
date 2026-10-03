@@ -8,7 +8,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | --- | --- | --- | --- |
 | SEC-1 | Attachment writes cannot escape the project | High | Planned |
 | SEC-2 | Destructive actions ask the owner and fail closed | High | Planned |
-| SEC-3 | Slack input and output hardening | High | Planned |
+| SEC-3 | Slack input and output hardening | High | Done (simulated Slack) |
 | SEC-4 | Bridge runs as a dedicated restricted user | High | Planned (needs VPS) |
 | SEC-5 | Keep secrets out of agent reach; isolate projects | High | Research/design |
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
@@ -50,6 +50,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 **Acceptance:** integration tests for the approval round trip; the real OpenCode 2.0.15 spike (`spike/v2`) must show a destructive command has no side effect before approval and none after rejection or timeout. Report which checks ran against real OpenCode.
 
 ### SEC-3: Slack input and output hardening
+
+**Done:** the bridge reads its workspace from `auth.test` and ignores events and clicks from other workspaces; sends the bot token only to `https://files.slack.com` and refuses redirects elsewhere; ignores malformed button values and refuses clicks outside the asking thread; posts a generic failure and logs the details; redacts Slack tokens and every channel server password in posts, updates, ephemerals and nested block text; and neutralises `@channel`, `@here` and `@everyone`. Verified with the simulated Slack server only; how a real Slack app renders the neutralised mentions is not verified. The configurable `teamId` from the scope below was replaced by `auth.test`.
 
 **Background:** `bridge/src/main.ts` receives Socket Mode events; `turn.ts` checks only `userId === ownerUserId`. This holds for owner-only use, but multiplayer (MP-1) will let other users through.
 
