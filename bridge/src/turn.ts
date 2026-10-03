@@ -1,5 +1,6 @@
-import { createSession, decide, inputsOf, pending, pluginReady, prompt, type AgentEvent, type Client, type Permission } from "./agent.ts"
+import { command, createSession, decide, inputsOf, pending, pluginReady, prompt, sessionModel, type AgentEvent, type Client, type Permission } from "./agent.ts"
 import { refusal, store, type SlackFile } from "./attachments.ts"
+import { commandOf, control, SERVER_COMMANDS } from "./commands.ts"
 import type { Channel, Config } from "./config.ts"
 import type { Approval, Db } from "./db.ts"
 
@@ -7,10 +8,10 @@ const LIMIT = 3500
 const EDIT_MS = 1000
 
 export type SlackApi = {
-  post: (channel: string, threadTs: string, text: string, blocks?: object[]) => Promise<string>
-  update: (channel: string, ts: string, text: string, blocks?: object[]) => Promise<void>
-  ephemeral: (channel: string, user: string, threadTs: string | undefined, text: string) => Promise<void>
-  download: (url: string) => Promise<Response>
+  post(channel: string, threadTs: string, text: string, blocks?: object[]): Promise<string>
+  update(channel: string, ts: string, text: string, blocks?: object[]): Promise<void>
+  ephemeral(channel: string, user: string, threadTs: string | undefined, text: string): Promise<void>
+  download(url: string): Promise<Response>
 }
 
 export type Incoming = {
@@ -28,6 +29,14 @@ export type Runtime = { channel: Channel; client: Client; available: boolean }
 
 type Run = { sessionId: string; channelId: string; threadTs: string; text: string; parts: string[]; lastEdit: number; timer?: NodeJS.Timeout | undefined; retryAt?: number }
 
+// One prompt waiting for its turn. A project runs one prompt at a time so threads never edit files concurrently.
+// command is set for OpenCode server commands such as /review; text is then the command's arguments.
+type Job = { client: Client; sessionId: string; channelId: string; threadTs: string; text: string; files: { uri: string; name: string }[]; command?: string }
+type Queue = { running?: { sessionId: string; startedAt: number } | undefined; jobs: Job[] }
+
+// A started prompt may not show as active yet; only treat a missing session as finished after this long.
+const STALE_MS = 60_000
+
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 function blocks(summary: string, value?: string) {
@@ -37,28 +46,12 @@ function blocks(summary: string, value?: string) {
   return [section, { type: "actions", elements: [button("approve", "Approve", "primary"), button("reject", "Reject", "danger")] }]
 }
 
-// Button values come back from Slack, so read them as untrusted JSON.
-function buttonValue(value: string): { sessionId: string; requestId: string } | undefined {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(value)
-  } catch {
-    return undefined
-  }
-  if (typeof parsed !== "object" || parsed === null || !("sessionId" in parsed) || !("requestId" in parsed)) return undefined
-  const { sessionId, requestId } = parsed
-  return typeof sessionId === "string" && typeof requestId === "string" ? { sessionId, requestId } : undefined
-}
-
-export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>) {
+export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>, offer: (channelId: string, threadTs: string) => Promise<void>) {
   const runs = new Map<string, Run>()
+  const queues = new Map<string, Queue>()
   let chain = Promise.resolve()
-  // Run tasks one at a time; a failed task is logged and never stops the queue.
-  const enqueue = (task: () => Promise<unknown>) => {
-    chain = chain.then(async () => void (await task())).catch((error: unknown) => console.error("bridge task failed:", error instanceof Error ? error.message : "error"))
-  }
   const serial = (task: () => Promise<unknown>) => {
-    enqueue(task)
+    chain = chain.then(async () => void (await task())).catch((error: unknown) => console.error("bridge task failed:", error instanceof Error ? error.message : "error"))
     return chain
   }
 
@@ -76,7 +69,7 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     if (!force && Date.now() - run.lastEdit < EDIT_MS) {
       run.timer ??= setTimeout(() => {
         run.timer = undefined
-        enqueue(() => flush(run, true))
+        void serial(() => flush(run, true))
       }, EDIT_MS)
       return
     }
@@ -105,11 +98,67 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     Object.assign(run, { text: "", parts: [], lastEdit: 0 })
   }
 
-  async function ask(request: Permission) {
+  const queueOf = (projectDir: string) => {
+    if (!queues.has(projectDir)) queues.set(projectDir, { jobs: [] })
+    return queues.get(projectDir)!
+  }
+
+  async function pump(queue: Queue) {
+    while (!queue.running && queue.jobs.length) {
+      const job = queue.jobs.shift()!
+      queue.running = { sessionId: job.sessionId, startedAt: Date.now() }
+      try {
+        if (job.command) await command(job.client, job.sessionId, job.command, job.text, job.files)
+        else await prompt(job.client, job.sessionId, job.text, job.files)
+      } catch (error) {
+        queue.running = undefined
+        await slack.post(job.channelId, job.threadTs, `The request failed: ${error instanceof Error ? error.message : "unknown error"}`).catch(() => undefined)
+      }
+    }
+  }
+
+  function release(sessionId: string) {
+    for (const queue of queues.values()) {
+      if (queue.running?.sessionId !== sessionId) continue
+      queue.running = undefined
+      void pump(queue)
+    }
+  }
+
+  async function enqueue(projectDir: string, job: Job) {
+    const queue = queueOf(projectDir)
+    queue.jobs.push(job)
+    const ahead = queue.jobs.length - 1 + (queue.running ? 1 : 0)
+    if (ahead) await slack.post(job.channelId, job.threadTs, `Queued: ${ahead} ahead of this message in this project.`)
+    await pump(queue)
+  }
+
+  // Recovers from a lost completion event, such as an event stream drop or an OpenCode restart.
+  async function unstick() {
+    for (const [projectDir, queue] of queues) {
+      const running = queue.running
+      if (!running || Date.now() - running.startedAt < STALE_MS) continue
+      const runtime = [...channels.values()].find((r) => r.channel.projectDir === projectDir)
+      const active = runtime && (await runtime.client.session.active().catch(() => undefined))
+      if (active && !(running.sessionId in active) && queue.running === running) release(running.sessionId)
+    }
+  }
+
+  // Subagent sessions are not mapped; their requests go to the nearest mapped ancestor's thread.
+  async function threadOf(client: Client, sessionId: string) {
+    for (let id: string | undefined = sessionId, depth = 0; id && depth < 5; depth++) {
+      const thread = db.threadBySession(id)
+      if (thread) return thread
+      id = (await client.session.get({ sessionID: id }).catch(() => undefined))?.parentID
+    }
+  }
+
+  async function ask(request: Permission, client: Client) {
     const known = db.approval(request.id)
     if (known?.message_ts) return
-    const thread = db.threadBySession(request.sessionID)
-    if (!thread) return
+    const thread = known ? { channel_id: known.channel_id, thread_ts: known.thread_ts } : await threadOf(client, request.sessionID)
+    // Nobody can approve a request without a thread, so it is refused rather than left waiting.
+    if (!thread) return decide(client, request.sessionID, request.id, "reject").catch(() => undefined)
     const summary = `*Approval needed:* ${escape(request.action)}\n\`\`\`${escape(request.resources.join("\n"))}\`\`\``
     if (!known) {
       db.addApproval({ request_id: request.id, session_id: request.sessionID, channel_id: thread.channel_id, thread_ts: thread.thread_ts, summary, asked_at: Date.now() })
@@ -130,19 +179,23 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     }
   }
 
-  async function apply(event: AgentEvent) {
-    if (event.type === "permission.asked") return ask(event.data)
-    const run = runOf(event.data.sessionID)
+  async function apply(event: AgentEvent, client: Client) {
+    const data = event.data ?? {}
+    if (event.type === "permission.asked") return ask(data as Permission, client)
+    if (event.type.startsWith("session.execution.") && event.type !== "session.execution.started" && typeof data.sessionID === "string") {
+      release(data.sessionID)
+    }
+    const run = typeof data.sessionID === "string" ? runOf(data.sessionID) : undefined
     if (!run) return
     switch (event.type) {
       case "session.retry.scheduled":
-        run.retryAt = event.data.at
+        run.retryAt = data.at
         return
       case "session.inbox.delivered":
         if (run.text) await finish(run, "done")
         return
       case "session.text.delta":
-        run.text += event.data.delta
+        run.text += data.delta ?? ""
         return flush(run)
       case "session.execution.succeeded":
         return finish(run, "done")
@@ -150,9 +203,9 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
         return finish(
           run,
           "failed",
-          event.data.error.status === 429
+          data.error?.status === 429
             ? `The provider rate limit was hit. Retry after ${run.retryAt ? new Date(run.retryAt).toISOString() : "later"}.`
-            : `The run failed: ${event.data.error.message || "the agent could not complete the request."}`,
+            : `The run failed: ${data.error?.message ?? "the agent could not complete the request."}`,
         )
       case "session.execution.interrupted":
         return finish(run, "failed", "The run was interrupted.")
@@ -166,31 +219,46 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     const say = (text: string) => slack.post(m.channelId, threadTs, text)
     if (m.userId !== config.ownerUserId) return slack.ephemeral(m.channelId, m.userId, threadTs, "Only the owner can talk to OpenCode here.")
     const runtime = channels.get(m.channelId)
-    if (!runtime) return say("This channel is not mapped to a project.")
+    if (!runtime) {
+      if (m.text.trim().toLowerCase() === "register") return offer(m.channelId, threadTs)
+      return say("This channel is not mapped to a project. Mention me with `register` to connect a project folder.")
+    }
     runtime.available ||= await pluginReady(runtime.client)
     if (!runtime.available) return say("The project environment is unavailable.")
 
     const { client, channel } = runtime
-    const inputs = m.files.length ? await inputsOf(client, channel.model) : []
-    const refused = m.files.map((file) => refusal(file, inputs, channel.model)).filter(Boolean)
+    const start = async (model: string) => {
+      const id = await createSession(client, channel.serverDir, model)
+      db.addThread({ team_id: m.teamId, channel_id: m.channelId, thread_ts: threadTs, session_id: id })
+      return id
+    }
+    const cmd = commandOf(m.text)
+    if (cmd && !SERVER_COMMANDS.has(cmd.name)) return say(await control(client, channel, cmd, thread?.session_id, start))
+
+    // The thread's session may have switched models, so check attachments against the model it uses now.
+    const model = m.files.length && thread ? await sessionModel(client, thread.session_id, channel.model) : channel.model
+    const inputs = m.files.length ? await inputsOf(client, model) : []
+    const refused = m.files.map((file) => refusal(file, inputs, model)).filter(Boolean)
     if (refused.length) return say(refused.join("\n"))
     const files = []
     for (const file of m.files) files.push(await store(channel, threadTs, file, slack.download))
 
-    let sessionId = thread?.session_id
-    if (!sessionId) {
-      sessionId = await createSession(client, channel.serverDir, channel.model)
-      db.addThread({ team_id: m.teamId, channel_id: m.channelId, thread_ts: threadTs, session_id: sessionId })
-    }
-    await prompt(client, sessionId, m.text.trim() || "The owner sent the attached files.", files)
+    const sessionId = thread?.session_id ?? (await start(channel.model))
+    const text = cmd ? cmd.args : m.text.trim() || "The owner sent the attached files."
+    await enqueue(channel.projectDir, { client, sessionId, channelId: m.channelId, threadTs, text, files, ...(cmd ? { command: cmd.name } : {}) })
   }
 
   async function click(userId: string, decision: "once" | "reject", value: string, channelId: string, threadTs?: string) {
     const refuse = (text: string) => slack.ephemeral(channelId, userId, threadTs, text)
     if (userId !== config.ownerUserId) return refuse("Only the owner can approve or reject actions.")
-    const button = buttonValue(value)
-    if (!button) return console.error("click ignored: malformed button value")
-    const { sessionId, requestId } = button
+    let parsed: { sessionId?: unknown; requestId?: unknown }
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return console.error("click ignored: malformed button value")
+    }
+    const { sessionId, requestId } = parsed ?? {}
+    if (typeof sessionId !== "string" || typeof requestId !== "string") return console.error("click ignored: malformed button value")
     const row = db.approval(requestId)
     // The button must sit in the thread where the bridge asked.
     if (row && (row.channel_id !== channelId || row.thread_ts !== threadTs)) return refuse("This button does not belong to this thread.")
@@ -235,7 +303,7 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
         for (const row of db.pendingApprovals(thread.session_id)) {
           if (!ids.has(row.request_id) && db.claim(row.request_id, "expired")) await settle(row, "No longer pending after a restart")
         }
-        for (const request of live) await ask(request)
+        for (const request of live) await ask(request, client)
       }
     }
   }
@@ -243,8 +311,11 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
   return {
     handle,
     click,
-    onEvent: (event: AgentEvent) => enqueue(() => apply(event)),
-    expire: () => serial(expire),
+    onEvent: (event: AgentEvent, client: Client) => void serial(() => apply(event, client)),
+    expire: () => serial(async () => {
+      await expire()
+      await unstick()
+    }),
     recover: () => serial(recover),
   }
 }

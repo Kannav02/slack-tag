@@ -13,7 +13,7 @@ flowchart LR
     SB --> FB[Shared project B files]
 ```
 
-Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner replies in it continue the same session without another mention. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. Concurrent edits can therefore conflict; there are no worktrees or file locks per thread.
+Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner replies in it continue the same session without another mention. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. To keep edits from colliding, the bridge runs one prompt at a time per project and queues the rest in arrival order; there are no worktrees per thread.
 
 ## Where the mapping lives
 
@@ -42,20 +42,37 @@ Recorded deployment on 2026-09-27; see the first live VPS deployment section in 
 
 The single `slack-tag` bridge service routes all configured channels. Adding another project does not require another Slack app or bridge process.
 
-## Adding a project today: manual
+## Adding a project manually
 
-There is no onboarding command or UI yet. An operator must:
+Use this for projects outside the registration folder, or when changing the original `alpha` service. An operator must:
 
 1. Put the project on the VPS and ensure the bridge and container user can access the required files. A VPS checkout does not automatically synchronize with a Mac checkout.
 2. Create a Slack channel, invite OpenCode, and obtain its channel ID.
-3. Run `deploy/prepare-project.sh <project folder>` from the application checkout. This creates any missing configuration files needed for read-only mounts; inspect the resulting project changes.
-4. Copy the `beta` service in `deploy/compose.yaml`, preserving its isolation settings and protected mounts. Give it a unique service name, loopback host port, project variable, env file, network, `/inbox` mount, and data volume; declare the volume and network at the top level and add the network to `key-proxy`. Remove `profiles: [extra]` or explicitly enable that profile when starting it.
+3. Run `deploy/prepare-project.sh <project folder>` from the application checkout. This creates any missing configuration files needed for read-only mounts and gives group 1000 write access, which agent shells need; inspect the resulting project changes.
+4. Copy the `beta` service in `deploy/compose.yaml`, preserving its isolation settings and protected mounts. Give it a unique service name, loopback host port, project variable, env file, network, `/inbox` mount, and data volume; declare the volume and network at the top level and add the network to `key-proxy`. Each network needs a bridge name starting with `st-` (so the firewall covers it) and its own subnet `172.30.N.0/24`; give `key-proxy` the address `172.30.N.2` on it and set the service's `extra_hosts` to `key-proxy:172.30.N.2`, because gVisor cannot use Docker's built-in DNS. Remove `profiles: [extra]` or explicitly enable that profile when starting it.
 5. Set the project path and port variables in the Compose environment file. The current VPS uses `/etc/slack-tag/compose.env`, passed explicitly with `docker compose --env-file /etc/slack-tag/compose.env -f /opt/slack-tag/deploy/compose.yaml`. Add the channel entry to `/var/lib/slack-tag/config.json`, following `config/example.json`: host path in `projectDir`, `/project` in `serverDir`, the matching localhost port in `opencodeUrl`, and a new `passwordEnv` name. Create `/var/lib/slack-tag/inbox/<channel name>`, owned by the bridge's user, before starting the service. Put a new random password in the project's env file and the same value under that name in `bridge.env`.
 6. Start the new Compose service and restart `slack-tag` to load the mapping. Follow [deployment instructions](deploy.md) for service management and credential handling.
 7. Verify a real Slack mention reads the intended project, a reply retains context, a separate thread starts fresh, and the original thread resumes after a restart with storage retained.
 
-## Future: make onboarding easier
+## Adding a project from Slack
 
-Planned, **not implemented**: one guided operator flow taking a project folder and Slack channel, validating access and duplicate mappings, preparing mounts, allocating a port and volume, updating configuration, starting the server, and checking readiness. It should preserve existing sessions and credentials and recover cleanly from partial setup failures. The exact command or UI is still to be decided.
+Requires an `onboarding` section in `config.json` (see `config/example.json`): `projectsRoot` is the only folder whose direct subfolders can be registered, `model` is used for new projects, and `firstPort` (default 4102) is the lowest host port to allocate. Without it, `register` replies that registration is not configured. The `slack-tag-opencode:2.0.15` image must already be built by `deploy/compose.yaml`.
 
-Acceptance: a second project can be connected without hand-editing Compose or JSON; the flow reports success only after readiness checks and provides a concrete Slack conversation check. Re-running it must not duplicate containers or overwrite existing project data.
+1. Put the project folder in `projectsRoot` on the VPS, create a Slack channel and invite OpenCode.
+2. As the owner, post `@OpenCode register` in the channel. The bot lists the subfolders that no channel uses yet; symlinks and other entries are skipped.
+3. Choose a folder. The bot updates the message as it runs `deploy/prepare-project.sh`, starts the container, waits for OpenCode to answer with the safety plugin, and saves the channel. The channel works immediately; no bridge restart.
+
+What gets created for a folder `app-one`:
+
+| Item | Value |
+| --- | --- |
+| Compose project | `slack-tag-app-one`, from `deploy/project.yaml`: its own OpenCode container and `key-proxy` container, `slack-tag-app-one_data` volume and `slack-tag-app-one_default` network |
+| Env file | `<config dir>/projects/app-one.env` (mode 0600): folder, port and a generated server password |
+| Server | `http://127.0.0.1:<port>`, reachable only from the VPS itself |
+| Channel entry | added to `config.json` with `serverDir` `/project` and `passwordFile` pointing at the env file; the password itself is stored only in the env file |
+
+Each registered project gets its own server password and its own copy of the key proxy, which reads the Go key from `proxy.env`. Its OpenCode container gets only a placeholder key and runs with the same isolation as hand-made channels: gVisor by default, agent shells as the separate `agent` user, and its own network `st-reg-<n>` (subnet `172.31.<n>.0/24`, numbered in the project's env file) that `deploy/firewall.sh` covers, so its agent cannot reach another project, the host, or the metadata address. Keep `172.31.0.0/16` free of other Docker networks. The agent can still use its proxy to spend inference.
+
+If a step fails, the message names it; choosing the folder again (or posting `register` again) resumes and reuses the same port, network and password; an env file from before networks were numbered gets one on the next attempt. To change Docker's runtime or image for registered projects, set `SLACK_TAG_RUNTIME` (`runc` only where gVisor cannot be installed) or `SLACK_TAG_IMAGE` (and `PROXY_ENV_FILE` if not the default) in `bridge.env`. The bridge passes `docker compose` only these variables plus `PATH`, `HOME` and `DOCKER_*`, never the Slack tokens or other channels' passwords.
+
+Not covered: cloning repositories, unregistering a channel, or moving a channel to another folder.

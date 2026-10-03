@@ -36,3 +36,7 @@ OPENCODE_API_KEY=<key> OPENCODE_SERVER_PASSWORD=<same password> DEMO_PROJECT=/sr
 | `@OpenCode` as "Other user", or in `#unmapped` | An ephemeral owner-only refusal, or "not mapped". |
 
 The fake Slack page approximates rendering. Verify Markdown visually in a development Slack workspace before claiming real Slack rendering works.
+
+## Queue check
+
+`node demo/queue-check.mjs` starts real OpenCode 2.0.15 with the safety plugin, the scripted model from `spike/v2`, this fake Slack and the bridge, without an API key. Thread A runs a slow shell command and thread B a fast one sent right after. It passes when B gets a "Queued" reply and `notes.txt` ends up `A` then `B`. Set `KEEP_OPEN=1` to keep everything running at http://127.0.0.1:3000 afterwards.

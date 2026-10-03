@@ -2,8 +2,9 @@ import { dirname, join } from "node:path"
 import bolt from "@slack/bolt"
 import { connect, pluginReady, subscribe } from "./agent.ts"
 import type { SlackFile } from "./attachments.ts"
-import { loadConfig } from "./config.ts"
+import { loadConfig, passwordOf } from "./config.ts"
 import { openDb } from "./db.ts"
+import { createOnboarding } from "./onboard.ts"
 import { createRouter, type Runtime, type SlackApi } from "./turn.ts"
 
 function required(name: string): string {
@@ -47,7 +48,7 @@ const channels = new Map<string, Runtime>()
 const passwords = new Set<string>()
 for (const [id, channel] of Object.entries(config.channels)) {
   // Each server has its own password, so one project's agent cannot drive another project's server.
-  const password = required(channel.passwordEnv)
+  const password = passwordOf(id, channel)
   if (passwords.has(password)) throw new Error(`channel ${id} reuses another channel's server password`)
   passwords.add(password)
   secrets.push(password)
@@ -72,14 +73,20 @@ const slack: SlackApi = {
   },
   download,
 }
-const router = createRouter(config, db, slack, channels)
+const onboarding = createOnboarding(config, configPath, slack, channels, (id, runtime, password) => {
+  secrets.push(password)
+  channels.set(id, runtime)
+  subscribe(runtime.client, (event) => router.onEvent(event, runtime.client))
+  console.log(`channel ${id} (${runtime.channel.name}) registered`)
+})
+const router = createRouter(config, db, slack, channels, onboarding.offer)
 const auth = await app.client.auth.test()
 const botId = auth.user_id
 // The app could be installed elsewhere; only this workspace may drive it.
 const teamId = auth.team_id
 const mention = `<@${botId}>`
 
-for (const { client } of channels.values()) subscribe(client, router.onEvent)
+for (const { client } of channels.values()) subscribe(client, (event) => router.onEvent(event, client))
 await router.recover()
 setInterval(() => void router.expire(), 15_000)
 
@@ -114,6 +121,16 @@ for (const [actionId, decision] of [["approve", "once"], ["reject", "reject"]] a
       .catch((error: unknown) => console.error("click failed:", redact(messageOf(error))))
   })
 }
+
+app.action("register_folder", async ({ ack, body, action }) => {
+  await ack()
+  const b = body as { team?: { id: string }; user: { id: string }; channel?: { id: string }; message?: { ts: string } }
+  if (b.team?.id !== teamId) return
+  const folder = (action as { selected_option?: { value: string } }).selected_option?.value ?? ""
+  await onboarding
+    .choose(b.user.id, b.channel?.id ?? "", b.message?.ts ?? "", folder)
+    .catch((error: unknown) => console.error("register failed:", redact(messageOf(error))))
+})
 
 await app.start()
 console.log("bridge connected")

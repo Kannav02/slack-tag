@@ -27,6 +27,18 @@
 - Never commit credentials, `.env` files, databases, attachments, or local Notion login state.
 - Never treat old `docs/plan.md` slice prompts or Bun design documents as current setup instructions.
 
+## VPS Deployment Order
+
+Only after explicit authorization (see Ask First). Commands and migrations are in `docs/deploy.md` (Install and Update); follow this order, because each step depends on the one before:
+
+1. Install gVisor (`runsc install`, restart Docker), or set `SLACK_TAG_RUNTIME=runc` where it cannot run.
+2. Stop `slack-tag`. Create `proxy.env` (Go key) and one env file per project; add each channel's `passwordEnv` to `config.json` and its password to `bridge.env`.
+3. Create the `slack-tag` user and fix state/inbox ownership, and create `/var/lib/slack-tag/inbox/<channel name>`. The bridge user (SEC-4) never ships without the separate inbox (SEC-1): the hardened unit cannot reach project folders.
+4. Rerun `deploy/prepare-project.sh` on every project (agent shells need group write).
+5. `docker compose down`, then `up -d --build`: the containers and the bridge must move together (the bridge only accepts plugin policy version 3, and networks get fixed subnets).
+6. Install both units; start `slack-tag-firewall` before `slack-tag`.
+7. Verify: `journalctl -u slack-tag` shows every channel ready, then a real Slack mention, reply, approval and upload. Record results in `docs/findings.md`.
+
 ## Code Structure
 
 - `architecture.md`, `opencode-interface.md`, and original `docs/plan.md` prompts are historical. Current deployment mapping is in `docs/project-mapping.md`.
