@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+// oxlint-disable-next-line no-restricted-imports -- Bolt resolves from bridge/, not the root package.
 import { createRequire } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { connect } from "../bridge/src/agent.ts";
@@ -6,7 +7,9 @@ import plugin from "../plugin/index.ts";
 
 // Setup check only: no Slack connection, provider call, or project agent starts.
 const bridgeRequire = createRequire(new URL("../bridge/package.json", import.meta.url));
-const { App, SocketModeReceiver } = bridgeRequire("@slack/bolt");
+const bolt: unknown = bridgeRequire("@slack/bolt");
+assert.ok(typeof bolt === "object" && bolt !== null && "App" in bolt && "SocketModeReceiver" in bolt);
+const { App, SocketModeReceiver } = bolt;
 assert.ok(plugin);
 assert.equal(process.versions.node.split(".")[0], "24", "Use Node 24");
 assert.equal(typeof App, "function");
