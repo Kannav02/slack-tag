@@ -37,7 +37,7 @@ function blocks(summary: string, value?: string) {
   return [section, { type: "actions", elements: [button("approve", "Approve", "primary"), button("reject", "Reject", "danger")] }]
 }
 
-export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>) {
+export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>, offer: (channelId: string, threadTs: string) => Promise<void>) {
   const runs = new Map<string, Run>()
   let chain = Promise.resolve()
   const serial = (task: () => Promise<unknown>) => {
@@ -150,7 +150,10 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     const say = (text: string) => slack.post(m.channelId, threadTs, text)
     if (m.userId !== config.ownerUserId) return slack.ephemeral(m.channelId, m.userId, threadTs, "Only the owner can talk to OpenCode here.")
     const runtime = channels.get(m.channelId)
-    if (!runtime) return say("This channel is not mapped to a project.")
+    if (!runtime) {
+      if (m.text.trim().toLowerCase() === "register") return offer(m.channelId, threadTs)
+      return say("This channel is not mapped to a project. Mention me with `register` to connect a project folder.")
+    }
     runtime.available ||= await pluginReady(runtime.client)
     if (!runtime.available) return say("The project environment is unavailable.")
 

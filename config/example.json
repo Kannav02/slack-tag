@@ -1,6 +1,11 @@
 {
   "ownerUserId": "U0123456789",
   "approvalTimeoutMinutes": 30,
+  "onboarding": {
+    "projectsRoot": "/home/devuser/projects",
+    "model": "opencode-go/kimi-k2.7-code",
+    "firstPort": 4102
+  },
   "channels": {
     "C0123456789": {
       "name": "alpha",

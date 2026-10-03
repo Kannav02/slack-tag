@@ -41,9 +41,9 @@ Recorded deployment on 2026-09-27; see the first live VPS deployment section in 
 
 The single `slack-tag` bridge service routes all configured channels. Adding another project does not require another Slack app or bridge process.
 
-## Adding a project today: manual
+## Adding a project manually
 
-There is no onboarding command or UI yet. An operator must:
+Use this for projects outside the registration folder, or when changing the original `alpha` service. An operator must:
 
 1. Put the project on the VPS and ensure the bridge and container user can access the required files. A VPS checkout does not automatically synchronize with a Mac checkout.
 2. Create a Slack channel, invite OpenCode, and obtain its channel ID.
@@ -53,8 +53,25 @@ There is no onboarding command or UI yet. An operator must:
 6. Start the new Compose service and restart `slack-tag` to load the mapping. Follow [deployment instructions](deploy.md) for service management and credential handling.
 7. Verify a real Slack mention reads the intended project, a reply retains context, a separate thread starts fresh, and the original thread resumes after a restart with storage retained.
 
-## Future: make onboarding easier
+## Adding a project from Slack
 
-Planned, **not implemented**: one guided operator flow taking a project folder and Slack channel, validating access and duplicate mappings, preparing mounts, allocating a port and volume, updating configuration, starting the server, and checking readiness. It should preserve existing sessions and credentials and recover cleanly from partial setup failures. The exact command or UI is still to be decided.
+Requires an `onboarding` section in `config.json` (see `config/example.json`): `projectsRoot` is the only folder whose direct subfolders can be registered, `model` is used for new projects, and `firstPort` (default 4102) is the lowest host port to allocate. Without it, `register` replies that registration is not configured. The `slack-tag-opencode:2.0.15` image must already be built by `deploy/compose.yaml`.
 
-Acceptance: a second project can be connected without hand-editing Compose or JSON; the flow reports success only after readiness checks and provides a concrete Slack conversation check. Re-running it must not duplicate containers or overwrite existing project data.
+1. Put the project folder in `projectsRoot` on the VPS, create a Slack channel and invite OpenCode.
+2. As the owner, post `@OpenCode register` in the channel. The bot lists the subfolders that no channel uses yet; symlinks and other entries are skipped.
+3. Choose a folder. The bot updates the message as it runs `deploy/prepare-project.sh`, starts the container, waits for OpenCode to answer with the safety plugin, and saves the channel. The channel works immediately; no bridge restart.
+
+What gets created for a folder `app-one`:
+
+| Item | Value |
+| --- | --- |
+| Compose project | `slack-tag-app-one`, from `deploy/project.yaml`: its own OpenCode container and `key-proxy` container, `slack-tag-app-one_data` volume and `slack-tag-app-one_default` network |
+| Env file | `<config dir>/projects/app-one.env` (mode 0600): folder, port and a generated server password |
+| Server | `http://127.0.0.1:<port>`, reachable only from the VPS itself |
+| Channel entry | added to `config.json` with `serverDir` `/project` and `passwordFile` pointing at the env file; the password itself is stored only in the env file |
+
+Each registered project gets its own server password and its own copy of the key proxy, which reads the Go key from `proxy.env`. Its OpenCode container gets only a placeholder key, and it shares no network with any other project, so its agent cannot reach another project's server. The agent can still read its own server's password, and it can use its proxy to spend inference.
+
+If a step fails, the message names it; choosing the folder again (or posting `register` again) resumes and reuses the same port and password. To change Docker's runtime or image for registered projects, set `SLACK_TAG_RUNTIME` or `SLACK_TAG_IMAGE` (and `PROXY_ENV_FILE` if not the default) in `bridge.env`. The bridge passes `docker compose` only these variables plus `PATH`, `HOME` and `DOCKER_*`, never the Slack tokens or other channels' passwords.
+
+Not covered: cloning repositories, unregistering a channel, or moving a channel to another folder.
