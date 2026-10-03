@@ -4,7 +4,7 @@ Current snapshot: 2026-10-03, covering `main` after SEC-1 to SEC-5, Slack projec
 
 Threat model: the agent is untrusted. It reads project files, web pages and attachments that may carry injected instructions, and it runs commands on its own. The questions here are what each component can reach and what actually stops it.
 
-Main `920460a`, including SEC-1 to SEC-5, was deployed to the VPS on 2026-10-03 with owner authorization. Host/container checks passed; real Slack approval and upload verification remain pending. See the VPS security migration in [findings](findings.md). Onboarding remains unconfigured because folder discovery/preparation is incompatible with the hardened bridge unit.
+Main `920460a`, including SEC-1 to SEC-5, was deployed to the VPS on 2026-10-03 with owner authorization. Host/container checks and real Slack mention/reply, approve-once, and per-thread model switching passed; uploads and rejection remain unverified live. See the VPS security migration and manual Slack checks in [findings](findings.md). Onboarding remains unconfigured because folder discovery/preparation is incompatible with the hardened bridge unit; Slack registration returns that it is not configured.
 
 ## Evidence labels
 
@@ -163,4 +163,4 @@ Verified on 2026-10-03 (**VPS**); details and limits are in [findings](findings.
 - `docker inspect` shows `runsc` for every project container and an `st-` bridge name for every project network.
 - The bridge runs as `slack-tag`; `systemctl start slack-tag-project@<name>` works for it, while any other unit or `stop` is denied.
 
-The helper test used a missing project and an invalid unit name; a real registration was not attempted. Live Slack approvals/uploads, agent behavior through real inference, and onboarding remain pending.
+The helper test used a missing project and an invalid unit name; a real registration was not completed. A real Slack prompt ran `id` after approve-once and reported uid 1001. Live uploads, rejection and project registration remain pending.

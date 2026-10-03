@@ -149,3 +149,13 @@ Verified directly on the VPS, without posting to Slack:
 - Polkit allows the bridge user to start a validly named registration unit: the synthetic `nonexistent` project reaches the helper and fails with `no env file`. Stopping that unit and starting an invalidly named unit require authentication. The synthetic failure was reset afterwards.
 
 Real Slack mention/reply, approval, upload and model inference still need an owner smoke test; these checks do not establish those flows. Onboarding remains unconfigured. Its current bridge-side folder discovery/preparation cannot work against `/home/devuser/projects` under the hardened unit (`ProtectHome=yes`, writes restricted to state); preparation must move into the trusted helper before enabling it. The service sandbox was not weakened.
+
+## Manual Slack feature checks (2026-10-03)
+
+Used the native Slack UI in Kannav Work, against deployed `920460a`:
+
+- In `gem-research-suite`, a new owner mention read the project README and reported `/project` and GEM Research Suite. The `id` action asked in Slack, completed after approve-once, and returned `uid=1001(agent) gid=1000(node) groups=1000(node)`. A reply without a mention recalled `CEDAR-920460A` exactly.
+- In that thread, `@OpenCode /model` listed the current Kimi model and available Go models. `@OpenCode /model minimax-m3` returned `Model set to opencode-go/minimax-m3 for this thread`. A subsequent prompt completed and recalled the same phrase. `/model` in another existing thread still reported `opencode-go/kimi-k2.7-code`; the change did not alter that thread. The smoke-test thread remains on MiniMax.
+- In the previously empty, unmapped `social` channel, added OpenCode and sent `@OpenCode register`. Its reply was `This channel is not mapped to a project, and project registration is not configured.` Registration is blocked by the missing production onboarding configuration; folder selection/container creation were not reached, and no project was registered. The sandbox incompatibility documented above still needs a fix before enabling onboarding.
+
+Screenshots of the smoke response, remembered phrase, model switch with continued inference, and registration blocker were saved as local verification artifacts. Upload handling, reject-button behavior and the other Slack commands were not exercised in this manual run.
