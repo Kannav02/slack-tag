@@ -13,6 +13,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["bridge/src/**/*.ts", "plugin/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+  "include": ["bridge/src/**/*.ts", "plugin/**/*.ts", "proxy/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "bridge/node_modules", "plugin/node_modules"]
 }

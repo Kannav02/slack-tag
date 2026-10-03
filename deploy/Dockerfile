@@ -11,6 +11,7 @@ COPY plugin/package.json plugin/package-lock.json plugin/
 RUN cd plugin && npm ci --omit=dev
 COPY plugin plugin
 COPY deploy/opencode.global.jsonc opencode/opencode.jsonc
+COPY proxy proxy
 
 RUN mkdir -p /data /project && chown node:node /data /project
 

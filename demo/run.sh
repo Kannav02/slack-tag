@@ -42,6 +42,7 @@ cat > "$work/config.json" <<EOF
       "projectDir": "$DEMO_PROJECT",
       "serverDir": "${SERVER_DIR:-$DEMO_PROJECT}",
       "opencodeUrl": "$OPENCODE_URL",
+      "passwordEnv": "OPENCODE_SERVER_PASSWORD",
       "model": "${MODEL:-opencode-go/kimi-k2.7-code}"
     }
   }

@@ -13,7 +13,6 @@ function required(name: string): string {
 }
 
 const configPath = required("SLACK_TAG_CONFIG")
-const password = required("OPENCODE_SERVER_PASSWORD")
 const botToken = required("SLACK_BOT_TOKEN")
 const appToken = required("SLACK_APP_TOKEN")
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : "unknown error")
@@ -25,7 +24,12 @@ const redactBlocks = (blocks?: object[]) => blocks?.map((block) =>
 const config = loadConfig(configPath)
 const db = openDb(join(dirname(configPath), "slack-tag.sqlite"))
 const channels = new Map<string, Runtime>()
+const passwords = new Set<string>()
 for (const [id, channel] of Object.entries(config.channels)) {
+  // Each server has its own password, so one project's agent cannot drive another project's server.
+  const password = required(channel.passwordEnv)
+  if (passwords.has(password)) throw new Error(`channel ${id} reuses another channel's server password`)
+  passwords.add(password)
   const client = connect(channel.opencodeUrl, password)
   const available = await pluginReady(client)
   channels.set(id, { channel, client, available })
