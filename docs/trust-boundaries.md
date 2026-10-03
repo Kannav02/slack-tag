@@ -100,7 +100,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Registration only offers direct, non-symlink subfolders of `projectsRoot` with a safe name. | **Tested** |
 | Registration runs `prepare-project.sh` and `docker compose` without the Slack tokens or other channels' passwords in the child environment. | **Tested** |
 | The bridge runs as the dedicated `slack-tag` user with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, write access only to the state folder, and no capabilities. | **Real** (SEC-4, disposable systemd container) |
-| Registration needs the bridge to run `docker compose`, but `docs/deploy.md` does not give `slack-tag` Docker access. Granting it (the `docker` group) is root-equivalent, which would undo much of SEC-4. | **Gap** (Open): registration under the SEC-4 unit is not designed yet |
+| Registration does not give the bridge Docker access (root-equivalent). With `onboarding.start: "systemd"` the bridge may only `systemctl start slack-tag-project@<name>`, allowed by a polkit rule; root then runs `deploy/start-project.sh`, which checks the bridge-written env file and passes `docker compose` only checked values. | **Tested** (script and polkit rule logic, PR #22); real systemd and polkit not verified |
 
 ### Agent → its container and project
 
@@ -158,4 +158,4 @@ Before relying on SEC-1 to SEC-5 in production, after an authorized deployment:
 
 - From an agent shell: `id` shows uid 1001, `/proc/1/environ` is unreadable, `169.254.169.254` and the host's address are unreachable, and the key proxy answers.
 - `docker inspect` shows `runsc` for every project container and an `st-` bridge name for every project network.
-- The bridge runs as `slack-tag`, and a registration either works with the chosen Docker access model or is left disabled (no `onboarding` in `config.json`).
+- The bridge runs as `slack-tag`; `systemctl start slack-tag-project@<name>` works for it, while any other unit or `stop` is denied.
