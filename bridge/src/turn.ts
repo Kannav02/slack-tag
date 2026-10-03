@@ -1,5 +1,6 @@
-import { createSession, decide, inputsOf, pending, pluginReady, prompt, type AgentEvent, type Client, type Permission } from "./agent.ts"
+import { command, createSession, decide, inputsOf, pending, pluginReady, prompt, sessionModel, type AgentEvent, type Client, type Permission } from "./agent.ts"
 import { refusal, store, type SlackFile } from "./attachments.ts"
+import { commandOf, control, SERVER_COMMANDS } from "./commands.ts"
 import type { Channel, Config } from "./config.ts"
 import type { Approval, Db } from "./db.ts"
 
@@ -29,7 +30,8 @@ export type Runtime = { channel: Channel; client: Client; available: boolean }
 type Run = { sessionId: string; channelId: string; threadTs: string; text: string; parts: string[]; lastEdit: number; timer?: NodeJS.Timeout | undefined; retryAt?: number }
 
 // One prompt waiting for its turn. A project runs one prompt at a time so threads never edit files concurrently.
-type Job = { client: Client; sessionId: string; channelId: string; threadTs: string; text: string; files: { uri: string; name: string }[] }
+// command is set for OpenCode server commands such as /review; text is then the command's arguments.
+type Job = { client: Client; sessionId: string; channelId: string; threadTs: string; text: string; files: { uri: string; name: string }[]; command?: string }
 type Queue = { running?: { sessionId: string; startedAt: number } | undefined; jobs: Job[] }
 
 // A started prompt may not show as active yet; only treat a missing session as finished after this long.
@@ -44,7 +46,7 @@ function blocks(summary: string, value?: string) {
   return [section, { type: "actions", elements: [button("approve", "Approve", "primary"), button("reject", "Reject", "danger")] }]
 }
 
-export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>) {
+export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>, offer: (channelId: string, threadTs: string) => Promise<void>) {
   const runs = new Map<string, Run>()
   const queues = new Map<string, Queue>()
   let chain = Promise.resolve()
@@ -106,7 +108,8 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
       const job = queue.jobs.shift()!
       queue.running = { sessionId: job.sessionId, startedAt: Date.now() }
       try {
-        await prompt(job.client, job.sessionId, job.text, job.files)
+        if (job.command) await command(job.client, job.sessionId, job.command, job.text, job.files)
+        else await prompt(job.client, job.sessionId, job.text, job.files)
       } catch (error) {
         queue.running = undefined
         await slack.post(job.channelId, job.threadTs, `The request failed: ${error instanceof Error ? error.message : "unknown error"}`).catch(() => undefined)
@@ -216,24 +219,33 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     const say = (text: string) => slack.post(m.channelId, threadTs, text)
     if (m.userId !== config.ownerUserId) return slack.ephemeral(m.channelId, m.userId, threadTs, "Only the owner can talk to OpenCode here.")
     const runtime = channels.get(m.channelId)
-    if (!runtime) return say("This channel is not mapped to a project.")
+    if (!runtime) {
+      if (m.text.trim().toLowerCase() === "register") return offer(m.channelId, threadTs)
+      return say("This channel is not mapped to a project. Mention me with `register` to connect a project folder.")
+    }
     runtime.available ||= await pluginReady(runtime.client)
     if (!runtime.available) return say("The project environment is unavailable.")
 
     const { client, channel } = runtime
-    const inputs = m.files.length ? await inputsOf(client, channel.model) : []
-    const refused = m.files.map((file) => refusal(file, inputs, channel.model)).filter(Boolean)
+    const start = async (model: string) => {
+      const id = await createSession(client, channel.serverDir, model)
+      db.addThread({ team_id: m.teamId, channel_id: m.channelId, thread_ts: threadTs, session_id: id })
+      return id
+    }
+    const cmd = commandOf(m.text)
+    if (cmd && !SERVER_COMMANDS.has(cmd.name)) return say(await control(client, channel, cmd, thread?.session_id, start))
+
+    // The thread's session may have switched models, so check attachments against the model it uses now.
+    const model = m.files.length && thread ? await sessionModel(client, thread.session_id, channel.model) : channel.model
+    const inputs = m.files.length ? await inputsOf(client, model) : []
+    const refused = m.files.map((file) => refusal(file, inputs, model)).filter(Boolean)
     if (refused.length) return say(refused.join("\n"))
     const files = []
     for (const file of m.files) files.push(await store(channel, threadTs, file, slack.download))
 
-    let sessionId = thread?.session_id
-    if (!sessionId) {
-      sessionId = await createSession(client, channel.serverDir, channel.model)
-      db.addThread({ team_id: m.teamId, channel_id: m.channelId, thread_ts: threadTs, session_id: sessionId })
-    }
-    const text = m.text.trim() || "The owner sent the attached files."
-    await enqueue(channel.projectDir, { client, sessionId, channelId: m.channelId, threadTs, text, files })
+    const sessionId = thread?.session_id ?? (await start(channel.model))
+    const text = cmd ? cmd.args : m.text.trim() || "The owner sent the attached files."
+    await enqueue(channel.projectDir, { client, sessionId, channelId: m.channelId, threadTs, text, files, ...(cmd ? { command: cmd.name } : {}) })
   }
 
   async function click(userId: string, decision: "once" | "reject", value: string, channelId: string, threadTs?: string) {
