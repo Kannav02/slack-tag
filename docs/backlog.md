@@ -16,6 +16,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
 | ONB-1 | Add projects through Slack | Medium | Planned |
 | MP-1 | Multiplayer and concurrent-edit isolation | To decide | Research/design |
+| DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
 
 ## Current behavior
 
@@ -95,6 +96,25 @@ Write a current architecture and trust-boundary document (bridge, containers, pl
 
 - **CMD-1 Commands:** determine the supported command API on the pinned OpenCode release, map it to Slack, and verify effects in the correct project/session. Command syntax is not selected.
 - **ONB-1 Onboarding:** replace manual folder/container/channel mapping (`docs/project-mapping.md`) with a guided Slack flow. Preserve existing data, validate readiness and avoid duplicate setup on retry. Depends on SEC-5 for per-project passwords/networks.
+- **DEMO-1 Screenshot demos:** let the agent show that a feature works by driving a headless browser and posting screenshots or short recordings to the Slack thread, and later to the PR. See the proposal below.
+
+## DEMO-1 Screenshot demos: proposal, not a final design
+
+**Goal:** after a change, the agent opens the running app in a headless Chromium, walks through the feature, and the owner sees the screenshots in the thread without opening a terminal.
+
+- **Browser:** a headless Chromium sidecar container per project on the project's own network, following the per-project key-proxy pattern, so the OpenCode image stays small and the browser is separate from the project files. The alternative is Playwright plus Chromium inside the OpenCode image: simpler, but it adds about 400 MB, and Chromium needs `--no-sandbox` and more shared memory in a read-only container.
+- **Agent tools:** Playwright MCP (`@playwright/mcp`) configured in OpenCode and connected to the sidecar over CDP, giving the agent navigate, click, type and screenshot tools.
+- **Output:** the agent writes images to `.slack-tag/outbox/<thread>/`. The bridge, which already holds the Slack token, uploads new files to the thread. The agent receives no Slack or GitHub token; `git push` stays blocked.
+- **PRs (later):** a token-holding component outside the agent (the bridge or a proxy) attaches images to the PR, for example by committing them to a `pr-assets` branch and linking them in the description, using a token scoped to the repo.
+
+Open questions:
+
+- The app under test must be reachable from the sidecar: a dev server started inside the project container, or a public URL. SEC-5 egress limits would need an allowlist for it.
+- Resource cost: Chromium memory per project, and whether the sidecar runs only on demand.
+- The browser can reach whatever the project network can; it must not open pages that can reach the host or the bridge.
+- Record GIFs or short videos as well as stills.
+
+Acceptance: in a registered project, asking the agent to demo a page posts at least one screenshot of the running app in the thread, the agent's container never receives the Slack or GitHub token, and the sidecar cannot reach another project's containers.
 
 ## MP-1 Multiplayer: agreed direction
 
