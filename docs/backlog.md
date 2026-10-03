@@ -6,9 +6,9 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 
 | ID | Item | Priority | State |
 | --- | --- | --- | --- |
-| SEC-1 | Attachment writes cannot escape the project | High | Planned |
-| SEC-2 | Destructive actions ask the owner and fail closed | High | Planned |
-| SEC-3 | Slack input and output hardening | High | Planned |
+| SEC-1 | Attachment writes cannot escape the project | High | Done (inbox outside project) |
+| SEC-2 | Destructive actions ask the owner and fail closed | High | Done (policy version 3) |
+| SEC-3 | Slack input and output hardening | High | Done (simulated Slack) |
 | SEC-4 | Bridge runs as a dedicated restricted user | High | Planned (needs VPS) |
 | SEC-5 | Keep secrets out of agent reach; isolate projects | High | Done in PRs, VPS pending |
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
@@ -31,6 +31,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 
 ### SEC-1: Attachment writes cannot escape the project
 
+**Done:** uploads go to `<state dir>/inbox/<channel name>/<thread_ts>/`, owned by the bridge and mounted read-only at `/inbox` in the container. The bridge no longer writes into the project or `.git/info/exclude`, refuses a symlinked inbox folder, and refuses a `projectDir` that is `/`, holds, or sits inside the state folder. Verified by integration tests (a symlinked old inbox and `.git/info/exclude` stay untouched) and a Docker Desktop check that `/inbox` is read-only; not yet on the VPS.
+
 **Background:** The bridge runs on the VPS host, not in a container. For owner uploads, `store()` in `bridge/src/attachments.ts` writes into `<projectDir>/.slack-tag/inbox/<thread_ts>/` and appends `.slack-tag/` to `<projectDir>/.git/info/exclude`. The agent's container mounts the same project folder read-write, and `deploy/prepare-project.sh` makes the inbox writable by the container user.
 
 **Problem (proven):** the path check is textual (`resolve` + `startsWith`) and never inspects symlinks. The agent can replace the inbox or the thread folder with a symlink; the next upload is written wherever it points. It can also symlink `.git/info/exclude` to any file (for example `slack-tag.sqlite` or `config.json`), and the bridge appends to it. Writes happen as the bridge's host user (root with the committed unit; `devuser`, uid 1000, on the live VPS).
@@ -41,6 +43,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 
 ### SEC-2: Destructive actions ask the owner and fail closed
 
+**Done:** policy version 3, as listed in `SPEC.md`. Requests whose session has no mapped thread or ancestor are rejected at once. Still open: permission requests from subagent sessions are not re-posted after a bridge restart.
+
 **Background:** `plugin/src/policy.ts` decides every OpenCode permission request. Since 2026-09-27 (`SPEC.md`) it returns `allow` for everything except shell commands starting with `sudo` and edits to protected config paths. `deploy/opencode.global.jsonc` allows shell/edit/webfetch and denies `git push *` by text match. The Slack approval flow (approve-once, owner-only, silence rejects) still exists in `bridge/src/turn.ts`.
 
 **Problem:** destructive commands (`rm -rf`, `git reset --hard`, `git clean -fdx`, history rewrites, publishing, database drops) run automatically against the real project folder. Text matching is bypassable (`bash -c 'sudo …'`, `git -C . push`, scripts, `node -e`). The plugin overrides OpenCode's own default asks (for example `.env` reads and `external_directory`). If the plugin throws or fails to load, the base config is allow-all. Permission requests from subagent sessions are dropped by `turn.ts` because their session isn't mapped to a thread.
@@ -50,6 +54,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 **Acceptance:** integration tests for the approval round trip; the real OpenCode 2.0.15 spike (`spike/v2`) must show a destructive command has no side effect before approval and none after rejection or timeout. Report which checks ran against real OpenCode.
 
 ### SEC-3: Slack input and output hardening
+
+**Done:** the bridge reads its workspace from `auth.test` and ignores events and clicks from other workspaces; sends the bot token only to `https://files.slack.com` and refuses redirects elsewhere; ignores malformed button values and refuses clicks outside the asking thread; posts a generic failure and logs the details; redacts Slack tokens and every channel server password in posts, updates, ephemerals and nested block text; and neutralises `@channel`, `@here` and `@everyone`. Verified with the simulated Slack server only; how a real Slack app renders the neutralised mentions is not verified. The configurable `teamId` from the scope below was replaced by `auth.test`.
 
 **Background:** `bridge/src/main.ts` receives Socket Mode events; `turn.ts` checks only `userId === ownerUserId`. This holds for owner-only use, but multiplayer (MP-1) will let other users through.
 

@@ -120,6 +120,14 @@ The private `gem-research-suite` channel in Kannav Work maps to `/home/devuser/p
 
 Ran the branch's `deploy/compose.yaml` on Docker Desktop with `alpha`, `beta` and `key-proxy`, each project with its own env file. Each server accepted only its own password (200) and rejected the other's (401). From `alpha`, `beta` did not resolve by name and timed out by IP; both projects reached `key-proxy`. The `alpha` process environment did not contain `beta`'s password. The real bridge reported both channels ready with the right passwords and both unavailable when swapped. Not verified on the VPS, with gVisor, or through real Slack.
 
+## Policy version 3 runtime verification (2026-10-02)
+
+Ran the real OpenCode 2.0.15 server with `deploy/opencode.global.jsonc`, the safety plugin and a scripted model. OpenCode sends a chained or piped command as one resource per command (`ls; touch x` → `["ls", "touch x"]`), so the plugin checks every part; version 2 checked only the first and would have allowed `touch x`. `ls`, `git status` and `cat` ran without a prompt. `rm -rf src` asked and left `src` intact while waiting, after rejection and after 5 seconds of silence followed by the bridge's timeout rejection; it deleted `src` only after approve-once. `ls; touch`, `ls && touch` and `ls | sh` asked and did not run when rejected. `git -C . push`, `git push`, `sudo touch` and `curl … | sh` were refused without prompts; the bare remote stayed empty. With the same config and no plugin, `rm keep.txt` asked instead of running. Edit/read actions and subagent sessions were not exercised against real OpenCode (the scripted model only calls the shell tool); subagent routing is covered by the simulated-service bridge test.
+
+## Separate upload inbox (2026-10-02)
+
+On Docker Desktop, `alpha` from this branch's `compose.yaml` mounted the host inbox at `/inbox` read-only: the agent's user could list and read an upload, but creating a file or replacing the thread folder failed with "Read-only file system", and the project folder had no `.slack-tag/`. Integration tests show uploads land in `<state>/inbox/<channel>/<thread>/` and reach OpenCode as `file:///inbox/<thread>/<name>`; symlinks the agent plants at the old `.slack-tag/inbox` and `.git/info/exclude` receive no writes. Not verified on the VPS or with a real model reading the upload.
+
 ## Separate agent user, gVisor and firewall (2026-10-02)
 
 Ran the branch's image and `deploy/compose.yaml` with real OpenCode 2.0.15 and a scripted model behind `key-proxy`, under runc on Docker Desktop and under gVisor (`runsc` release-20260928.0) in Docker-in-Docker. In both, agent shell commands ran as `agent` (uid 1001) with no capabilities; reading `/proc/<server>/environ` and `/data` was denied; calling the server API from the shell without the password returned 401; the agent could still write and commit in the project. Under gVisor, `uname -r` reported `4.19.0-gvisor`.

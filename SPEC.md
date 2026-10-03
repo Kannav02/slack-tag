@@ -5,7 +5,11 @@ Tracking: the Slack Tag Notion page and the repository backlog.
 
 This document includes original requirements, not a claim that every feature shipped. Automatic idle shutdown/cold starts remain unimplemented; the build plan is historical.
 
-Current permission policy (2026-09-27): all actions previously requiring approval now run automatically. Keep the existing hard blocks on `git push`, `sudo`, and edits to protected OpenCode/Git configuration. Container isolation and shell credential stripping remain enabled. This decision supersedes the approval requirements and acceptance checks below; approval handling remains available for older pending requests.
+Current permission policy (2026-10-02, policy version 3, replacing the 2026-09-27 allow-all policy):
+
+- Runs without asking: reads and searches (except `.env` files), edits inside the project outside protected paths, and single shell commands from a named list: `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `grep`, `rg`, `find` (without `-delete`/`-exec`), `git status|log|diff|show|branch|add|commit` (without destructive flags or `--amend`), `npm|pnpm|yarn test|run|install|ci`, `pytest`, `make`, `tsc`, `node --test`.
+- Always refused, no prompt: `git push` in any form, `sudo`/`su`/`doas`, download-and-run (`curl … | sh`), and edits to protected OpenCode/Git configuration.
+- Everything else asks the owner in Slack, including chained or piped commands, web fetch/search and unknown actions. No answer within the timeout, a plugin error, or a missing plugin never allows.
 
 ## Problem Statement
 
