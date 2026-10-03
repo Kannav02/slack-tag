@@ -79,7 +79,7 @@ The unit runs the bridge as `slack-tag` (not uid 1000, the container user). Only
      find /var/lib/slack-tag -maxdepth 1 -type f -exec chmod 0600 {} +
      install -d -m 2750 -o slack-tag -g 1000 /var/lib/slack-tag/inbox
      chown root:root /etc/slack-tag/*.env && chmod 0600 /etc/slack-tag/*.env
-     rm -f /etc/systemd/system/slack-tag.service.d/override.conf
+     rm -f /etc/systemd/system/slack-tag.service.d/10-service-user.conf
      ```
 
      Then continue with step 2. To roll back, reinstall the previous unit (and the override, if any) and `chown -R` `/var/lib/slack-tag` back to the old user.

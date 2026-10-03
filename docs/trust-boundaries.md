@@ -4,7 +4,7 @@ Current snapshot: 2026-10-03, covering `main` after SEC-1 to SEC-5, Slack projec
 
 Threat model: the agent is untrusted. It reads project files, web pages and attachments that may carry injected instructions, and it runs commands on its own. The questions here are what each component can reach and what actually stops it.
 
-None of the SEC-1 to SEC-5 changes has been applied to the VPS yet. Applying them needs deployment authorization; until then the VPS runs the earlier setup described in [findings](findings.md).
+Main `920460a`, including SEC-1 to SEC-5, was deployed to the VPS on 2026-10-03 with owner authorization. Host/container checks passed; real Slack approval and upload verification remain pending. See the VPS security migration in [findings](findings.md). Onboarding remains unconfigured because folder discovery/preparation is incompatible with the hardened bridge unit.
 
 ## Evidence labels
 
@@ -12,6 +12,7 @@ Every claim about enforcement carries one label:
 
 - **Live**: checked on the VPS with real Slack (see [findings](findings.md), first live deployment).
 - **Real**: checked against real OpenCode 2.0.15 or a real container, outside the VPS (Docker Desktop, Docker-in-Docker or a disposable systemd container).
+- **VPS**: checked directly on the production host/container, without establishing a live Slack flow.
 - **Tested**: covered by `npm run check` integration tests with simulated Slack and OpenCode.
 - **Configured**: present in repo code or config, never checked at runtime.
 - **Gap**: a known weakness, with the backlog item that addresses it, or **Open** when no item exists yet.
@@ -24,7 +25,8 @@ flowchart LR
     Slack <-- Socket Mode, bot + app tokens --> Bridge
     subgraph Host[VPS host]
         Bridge[Bridge: Node.js, systemd, user slack-tag] --> State[(State dir /var/lib/slack-tag:<br/>config.json, slack-tag.sqlite,<br/>projects/*.env, inbox/)]
-        Bridge -- docker compose, registration --> Docker[Docker daemon]
+        Bridge -- systemctl start --> Helper[Root registration helper]
+        Helper -- docker compose --> Docker[Docker daemon]
         Bridge -- HTTP on 127.0.0.1, basic auth --> Server
         subgraph Net[Per-project network st-*, firewalled from host and metadata]
             subgraph Container[Project container, gVisor]
@@ -43,7 +45,7 @@ flowchart LR
 
 | Component | Runs as | Purpose |
 | --- | --- | --- |
-| Bridge (`bridge/src`) | `slack-tag` system user under `deploy/slack-tag.service`, with systemd sandboxing (**Real**, disposable systemd container). The VPS still runs the earlier unit as `devuser`, uid 1000. | Receives Slack events, maps threads to sessions, queues one run per project, streams replies, stores attachments, registers projects. |
+| Bridge (`bridge/src`) | `slack-tag` system user under `deploy/slack-tag.service`, with systemd sandboxing (**Real**, **VPS**). | Receives Slack events, maps threads to sessions, queues one run per project, streams replies, stores attachments, registers projects when onboarding is configured and accessible. |
 | State directory `/var/lib/slack-tag` | `slack-tag`, `0700`, files created with umask `0027` | `config.json` (channels, owner), `slack-tag.sqlite` (thread → session), `projects/<name>.env` (registered projects' port, network and password), `inbox/<channel>/<thread>/` (uploads). |
 | Credentials `/etc/slack-tag` | root, files `0600`; systemd reads `bridge.env` before dropping to `slack-tag` | `bridge.env` (Slack tokens, one password per hand-made channel), `<project>.env` (that server's password), `proxy.env` (model key). |
 | OpenCode container | Starts as root, `start-server` drops the server to `node` (uid 1000); `agent-shell` runs agent shells as `agent` (uid 1001). gVisor (`runsc`) by default. | `opencode serve` with the project at `/project`, uploads at `/inbox` (read-only) and its own `/data` volume. Hand-made channels use `deploy/compose.yaml`; registered ones use `deploy/project.yaml`. |
@@ -100,7 +102,8 @@ One channel maps to one project and one server; each thread is one session on it
 | Registration only offers direct, non-symlink subfolders of `projectsRoot` with a safe name. | **Tested** |
 | Registration runs `prepare-project.sh` and `docker compose` without the Slack tokens or other channels' passwords in the child environment. | **Tested** |
 | The bridge runs as the dedicated `slack-tag` user with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, write access only to the state folder, and no capabilities. | **Real** (SEC-4, disposable systemd container) |
-| Registration does not give the bridge Docker access (root-equivalent). With `onboarding.start: "systemd"` the bridge may only `systemctl start slack-tag-project@<name>`, allowed by a polkit rule; root then runs `deploy/start-project.sh`, which checks the bridge-written env file and passes `docker compose` only checked values. | **Tested** (script and polkit rule logic, PR #22); real systemd and polkit not verified |
+| Registration does not give the bridge Docker access (root-equivalent). With `onboarding.start: "systemd"` the bridge may only `systemctl start slack-tag-project@<name>`, allowed by a polkit rule; root then runs `deploy/start-project.sh`, which checks the bridge-written env file and passes `docker compose` only checked values. | **Tested** (PR #22), **VPS** (polkit authorization and missing-project rejection); real registration remains unverified |
+| Bridge-side registration discovery cannot see `/home/devuser/projects` with `ProtectHome=yes`, and bridge-side preparation cannot write projects with `ProtectSystem=strict`. The helper currently only starts Compose. | **Gap**: ONB-1; onboarding remains unconfigured on the VPS |
 
 ### Agent → its container and project
 
@@ -152,10 +155,12 @@ One channel maps to one project and one server; each thread is one session on it
 | Thread → session map | `slack-tag.sqlite` | The bridge user (state folder `0700`) |
 | Conversation history | Each container's `/data` volume | That project's server (not its agent shells); root |
 
-## Verification still needed on the VPS
+## VPS verification
 
-Before relying on SEC-1 to SEC-5 in production, after an authorized deployment:
+Verified on 2026-10-03 (**VPS**); details and limits are in [findings](findings.md):
 
 - From an agent shell: `id` shows uid 1001, `/proc/1/environ` is unreadable, `169.254.169.254` and the host's address are unreachable, and the key proxy answers.
 - `docker inspect` shows `runsc` for every project container and an `st-` bridge name for every project network.
 - The bridge runs as `slack-tag`; `systemctl start slack-tag-project@<name>` works for it, while any other unit or `stop` is denied.
+
+The helper test used a missing project and an invalid unit name; a real registration was not attempted. Live Slack approvals/uploads, agent behavior through real inference, and onboarding remain pending.
