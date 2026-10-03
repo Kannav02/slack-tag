@@ -53,6 +53,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 - One configured Slack owner identity controls messages and approval actions. Multi-user roles and onboarding are excluded.
 - Channel-to-folder mappings are operator configuration, not agent-controlled paths or a provisioning UI.
 - A channel selects one project environment. Threads within it use separate sessions, not separate copies of the project files.
+- The bridge runs one prompt at a time per project, in arrival order across all its threads, so sessions never edit the shared files concurrently. A message that has to wait gets a "Queued" reply. The queue is in memory; messages still waiting when the bridge restarts are dropped.
 - Execution is isolated per configured project/channel, not merely separated by process. Enforcement must constrain mounted files, host privileges, credentials, and resource access. Exact runtime configuration remains an implementation decision.
 
 ### Sessions and context
@@ -138,7 +139,7 @@ Keep checks feature-oriented. Combine related acceptance scenarios in one checkl
 - Additional agent adapters beyond OpenCode.
 - A web dashboard, scheduled jobs, or a new agent/tool execution engine.
 - User-facing stop/status controls and advanced run management beyond the automatic idle shutdown and on-demand startup described above.
-- Concurrent-edit coordination, worktrees per thread, merging, or locking product features. Threads share project files; V1 does not promise conflict-free simultaneous edits.
+- Worktrees per thread, merging, or parallel runs within one project. Threads share project files and take turns through the project queue.
 - Generated-file delivery back to Slack.
 - Comprehensive support for every attachment format or every provider subscription.
 

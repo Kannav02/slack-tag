@@ -290,6 +290,9 @@ test("Slack routing, queued prompts, Markdown replies, approvals, and session pe
   await until(() => messages.some((m) => m.method === "chat.update" && /nobody answered in time/.test(m.text)))
 
   send({ ts: "100.5" })
+  await until(() => messages.some((m) => m.thread_ts === "100.5" && /^Queued: 1 ahead/.test(m.text)))
+  assert.equal(prompts.length, 2)
+  emit("session.execution.succeeded", sessionID)
   await until(() => prompts.length === 3)
   assert.notEqual(prompts[2].sessionID, sessionID)
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM threads").get().n, 2)
@@ -301,6 +304,8 @@ test("Slack routing, queued prompts, Markdown replies, approvals, and session pe
   assert.equal(prompts[3].sessionID, sessionID)
   assert.equal(prompts[3].text, "continue after restart")
   assert.equal(sessions.length, 2)
+  // Prompts in one project run one at a time, so finish each run before the next prompt.
+  emit("session.execution.succeeded", sessionID)
 
   // Another workspace's event is ignored.
   send({ ts: "100.7" }, "TOTHER")
@@ -309,6 +314,7 @@ test("Slack routing, queued prompts, Markdown replies, approvals, and session pe
   await delay(200)
   assert.equal(prompts.length, 5)
   assert.equal(sessions.length, 3)
+  emit("session.execution.succeeded", prompts[4].sessionID)
 
   // Server passwords are redacted and broadcasts neutralised in agent output.
   emit("session.text.delta", sessionID, "<!channel> <!here|here> @everyone pw-synthetic-secret")
@@ -324,6 +330,7 @@ test("Slack routing, queued prompts, Markdown replies, approvals, and session pe
   send({ ts: "100.9", files: file(`${base}/files/ok.txt`) })
   await until(() => prompts.length === 6)
   assert.equal(prompts[5].files.length, 1)
+  emit("session.execution.succeeded", prompts[5].sessionID)
   for (const [ts, url] of [["100.10", `${base.replace("127.0.0.1", "localhost")}/steal`], ["100.11", `${base}/files/redirect`]]) {
     send({ ts, files: file(url) })
     await until(() => messages.some((m) => m.thread_ts === ts))
@@ -413,6 +420,14 @@ test("Slack commands run OpenCode commands and control the thread's session", { 
   await h.until(() => h.prompts.length === 1)
   assert.equal(h.prompts[0].text, "/tmp/log.txt is empty, why?")
   assert.equal(h.calls.filter((c) => c.type === "command").length, 1)
+
+  // A server command starts a run, so it waits behind the project's running prompt.
+  h.send({ ts: "300.11", text: "<@UBOT> /review again" })
+  await reply("300.11", /^Queued: 1 ahead/)
+  assert.equal(h.calls.filter((c) => c.type === "command").length, 1)
+  h.emit("session.execution.succeeded", h.prompts[0].sessionID)
+  await h.until(() => h.calls.filter((c) => c.type === "command").length === 2)
+  assert.equal(h.calls.at(-1).text, "again")
   assert.deepEqual(h.unexpected, [])
 })
 
