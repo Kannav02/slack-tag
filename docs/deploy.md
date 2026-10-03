@@ -8,7 +8,7 @@ Use the production Slack app here, never the dev app used by cloud agents. Socke
 
 ## Install
 
-Node.js 22.18 or later must be at `/usr/bin/node`, and Docker must have the Compose plugin. Install gVisor (`runsc`) if the VPS supports it. The checkout lives at `/opt/slack-tag`. The bridge writes `slack-tag.sqlite` beside `SLACK_TAG_CONFIG`, so the config lives in `/var/lib/slack-tag`.
+Node.js 22.18 or later must be at `/usr/bin/node`, and Docker must have the Compose plugin. Project containers run under gVisor by default: install `runsc` from the [gVisor apt repository](https://gvisor.dev/docs/user_guide/install/) and run `runsc install && systemctl restart docker`. Where gVisor cannot run, put `SLACK_TAG_RUNTIME=runc` in `deploy/.env`. The checkout lives at `/opt/slack-tag`. The bridge writes `slack-tag.sqlite` beside `SLACK_TAG_CONFIG`, so the config lives in `/var/lib/slack-tag`.
 
 1. Put the repo at `/opt/slack-tag` at the commit to run, and install both packages.
 
@@ -32,19 +32,19 @@ install -d -m 2750 -o slack-tag -g 1000 /var/lib/slack-tag/inbox
 3. Fill the empty values. The Slack tokens go only in `bridge.env`, and the Go key only in `proxy.env`. Each project gets its own server password (for example `openssl rand -hex 32`): put it in that project's env file (`alpha.env`) as `OPENCODE_SERVER_PASSWORD`, and in `bridge.env` under the name its channel's `passwordEnv` gives (`ALPHA_SERVER_PASSWORD`). The bridge refuses to start if two channels share a password. Leave the env files `root`-owned with mode `0600`: systemd reads `bridge.env` before switching to the `slack-tag` user, so the bridge itself cannot reread it. Keep `config.json` owned by `slack-tag` with mode `0600`.
 
    Project containers never receive the Go key. Their OpenCode config sends model requests to the internal `key-proxy` service, which replaces the placeholder credential with the real key and forwards only to `https://opencode.ai/zen/go/v1`.
-4. For each channel, run `deploy/prepare-project.sh <project folder>`, create its env file as in step 2, give it a service in `deploy/compose.yaml` (copy `beta`, with its own env file and network, and add that network to `key-proxy`), and add it to `/var/lib/slack-tag/config.json` in the shape of `config/example.json`, with `serverDir` set to `/project` and `opencodeUrl` set to the service's host port.
+4. For each channel, run `deploy/prepare-project.sh <project folder>`, create its upload inbox `/var/lib/slack-tag/inbox/<channel name>` owned by the bridge's user (`install -d -m 0755 -o <bridge user> …`) before starting its container, create its env file as in step 2, give it a service in `deploy/compose.yaml` (copy `beta`, with its own env file, network and `/inbox` mount, and add that network to `key-proxy`), and add it to `/var/lib/slack-tag/config.json` in the shape of `config/example.json`, with `serverDir` set to `/project` and `opencodeUrl` set to the service's host port.
 5. Write `deploy/.env` with the Compose variables, for example `ALPHA_PROJECT=/srv/slack-tag/projects/alpha` and `SLACK_TAG_RUNTIME=runsc`. It holds paths only, no secrets. Then start the containers. `restart: unless-stopped` brings them back after a reboot.
 
 ```bash
 docker compose -f deploy/compose.yaml up -d --build
 ```
 
-6. Install the unit and start the bridge.
+6. Install the units and start the firewall and the bridge. The firewall blocks project containers from the cloud metadata address and from the host; other internet access stays open.
 
 ```bash
-install -m 0644 deploy/slack-tag.service /etc/systemd/system/slack-tag.service
+install -m 0644 deploy/slack-tag.service deploy/slack-tag-firewall.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now slack-tag
+systemctl enable --now slack-tag-firewall slack-tag
 ```
 
 The unit runs the bridge as `slack-tag` (not uid 1000, the container user). Only `/var/lib/slack-tag` is writable; the rest of the system is read-only and `/home` is hidden, so the bridge never touches project folders. The attachment inbox is the one shared folder: owner `slack-tag`, group 1000, mode `2750`, so the containers' user can read uploads but not change them, and new folders inherit group 1000. Everything else in `/var/lib/slack-tag` is private to `slack-tag`.
@@ -56,6 +56,8 @@ The unit runs the bridge as `slack-tag` (not uid 1000, the container user). Only
 1. In `/opt/slack-tag`, check out the new commit and rerun the two `npm ci` commands.
    - Upgrading to the key proxy: create `proxy.env` as in install step 2, move `OPENCODE_API_KEY` from `opencode.env` into it, and delete the line from `opencode.env`. Compose overrides any key left in `opencode.env`, but do not keep a second copy.
    - Upgrading to per-project passwords: for each project, create its env file (`alpha.env`) with a new random `OPENCODE_SERVER_PASSWORD`, add the same value to `bridge.env` under the channel's `passwordEnv` name, and add `passwordEnv` to each channel in `config.json`. Then remove `OPENCODE_SERVER_PASSWORD` from `bridge.env` and delete `opencode.env`. Rolling back to an earlier commit needs both restored.
+   - Upgrading to the separate upload inbox: create `/var/lib/slack-tag/inbox/<channel name>` for each channel as in install step 4, and set `ALPHA_INBOX` in the Compose environment if it differs from `/var/lib/slack-tag/inbox/alpha`. Channel names may only use letters, digits, `-` and `_`. The bridge now refuses a `projectDir` that is `/`, holds, or sits inside `/var/lib/slack-tag`. Old uploads in `<project>/.slack-tag/` are no longer used; delete them once no thread needs them.
+   - Upgrading to the separate agent user, gVisor and firewall: rerun `deploy/prepare-project.sh` on each project (agent shells run as uid 1001 in group 1000, so the project needs group write), install gVisor as in the install section, and install and enable `slack-tag-firewall` as in install step 6. Compose now gives each project network a fixed subnet (`172.30.N.0/24`); `docker compose down` before `up` so the networks are recreated.
    - Upgrading to the dedicated bridge user: deploy together with the separate attachment inbox (SEC-1), because this unit cannot reach project folders. Stop the bridge, then create the user and fix ownership. If an override sets `User=` (the live VPS uses `devuser`), remove it.
 
      ```bash
