@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { createServer } from "node:net"
-import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises"
+import { appendFile, lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
@@ -24,6 +24,13 @@ const portOf = (url: string) => Number(new URL(url).port)
 const messageOf = (error: unknown) => {
   const e = error as { stderr?: string; message?: string }
   return (e.stderr?.trim() || e.message || "unknown error").slice(-500)
+}
+
+// The lowest network number no other registered project uses; project.yaml turns it into subnet and bridge name.
+function netFor(others: Record<string, string>[]) {
+  const used = new Set(others.map((env) => Number(env.SLACK_TAG_NET)))
+  for (let net = 1; net <= 254; net++) if (!used.has(net)) return net
+  throw new Error("all 254 project networks are in use")
 }
 
 const free = (port: number) =>
@@ -111,23 +118,27 @@ export function createOnboarding(config: Config, configPath: string, slack: Slac
     }
   }
 
-  // Reuse the port and password from an earlier attempt, so a retry starts the same container.
+  // Reuse the port, network and password from an earlier attempt, so a retry starts the same container.
   async function envFor(name: string, projectDir: string) {
     await mkdir(stateDir, { recursive: true, mode: 0o700 })
     const file = join(stateDir, `${name}.env`)
+    const others: Record<string, string>[] = []
+    for (const other of await readdir(stateDir)) {
+      if (other.endsWith(".env") && join(stateDir, other) !== file) others.push(parseEnv(await readFile(join(stateDir, other), "utf8")))
+    }
     const known = await readFile(file, "utf8").then(parseEnv, () => undefined)
     if (known) {
       if (known.SLACK_TAG_PROJECT !== projectDir) throw new Error(`${file} belongs to ${known.SLACK_TAG_PROJECT}`)
+      // Env files written before projects had their own network get one now.
+      if (!known.SLACK_TAG_NET) await appendFile(file, `SLACK_TAG_NET=${netFor(others)}\n`)
       return { port: Number(known.SLACK_TAG_PORT), password: known.SLACK_TAG_PASSWORD! }
     }
     const taken = new Set(Object.values(config.channels).map((channel) => portOf(channel.opencodeUrl)))
-    for (const other of await readdir(stateDir)) {
-      if (other.endsWith(".env")) taken.add(Number(parseEnv(await readFile(join(stateDir, other), "utf8")).SLACK_TAG_PORT))
-    }
+    for (const other of others) taken.add(Number(other.SLACK_TAG_PORT))
     let port = config.onboarding!.firstPort ?? 4102
     while (taken.has(port) || FETCH_BLOCKED.has(port) || !(await free(port))) port++
     const password = randomBytes(24).toString("hex")
-    await writeFile(file, `SLACK_TAG_PROJECT=${projectDir}\nSLACK_TAG_PORT=${port}\nSLACK_TAG_PASSWORD=${password}\n`, { mode: 0o600 })
+    await writeFile(file, `SLACK_TAG_PROJECT=${projectDir}\nSLACK_TAG_PORT=${port}\nSLACK_TAG_PASSWORD=${password}\nSLACK_TAG_NET=${netFor(others)}\n`, { mode: 0o600 })
     return { port, password }
   }
 
