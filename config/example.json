@@ -4,7 +4,8 @@
   "onboarding": {
     "projectsRoot": "/home/devuser/projects",
     "model": "opencode-go/kimi-k2.7-code",
-    "firstPort": 4102
+    "firstPort": 4102,
+    "start": "systemd"
   },
   "channels": {
     "C0123456789": {

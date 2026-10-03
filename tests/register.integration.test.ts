@@ -334,7 +334,7 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   assert.equal(calls.length, 2);
   assert.equal(
     calls[1],
-    `compose -p slack-tag-app-one -f ${join(root, "deploy/project.yaml")} --env-file ${envFile} up -d`,
+    `compose -p slack-tag-app-one -f ${join(root, "deploy/project.yaml")} --env-file /dev/null up -d`,
   );
   const dockerEnv = await readFile(join(work, "docker.env"), "utf8");
   assert.doesNotMatch(dockerEnv, /xoxb-test|xapp-test|taken-secret|TAKEN_SERVER_PASSWORD/);

@@ -1,0 +1,13 @@
+// Lets the bridge's slack-tag user start registered projects and nothing else.
+// systemd asks polkit before acting on a non-root request; every other request keeps the default (denied).
+// Install in /etc/polkit-1/rules.d (polkit 0.106 or later, which reads JavaScript rules).
+polkit.addRule(function (action, subject) {
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    subject.user === "slack-tag" &&
+    action.lookup("verb") === "start" &&
+    /^slack-tag-project@[a-z0-9][a-z0-9_-]{0,39}\.service$/.test(action.lookup("unit"))
+  ) {
+    return polkit.Result.YES;
+  }
+});

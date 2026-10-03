@@ -25,7 +25,7 @@ const FETCH_BLOCKED = new Set([
   1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669,
   6679, 6697, 10080,
 ]);
-// Docker gets only what it needs from the bridge's environment: never the Slack tokens or other channels' passwords.
+// The start script gets only what it needs from the bridge's environment: never the Slack tokens or other channels' passwords.
 const PASSED =
   /^(PATH|HOME|USER|LANG|LC_\w+|TMPDIR|XDG_RUNTIME_DIR|DOCKER_\w+|SLACK_TAG_(RUNTIME|IMAGE)|PROXY_ENV_FILE)$/;
 
@@ -118,6 +118,8 @@ export function createOnboarding(
       return show(`\`${folder}\` is already connected to another channel.`);
 
     const name = folder.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    if (name.length > 40)
+      return show(`\`${folder}\` is too long for a project name (40 characters at most).`);
     let step = "Preparing the folder";
     try {
       await show(`Registering \`${folder}\`…`);
@@ -138,25 +140,20 @@ export function createOnboarding(
       const channel = prepareChannel(configPath, channelId, stored);
       // Create the inbox before Docker would create the mount point as root.
       await mkdir(channel.inboxDir, { recursive: true, mode: 0o755 });
-      const env = {
-        ...Object.fromEntries(Object.entries(process.env).filter(([key]) => PASSED.test(key))),
-        SLACK_TAG_INBOX: channel.inboxDir,
-      };
-      await exec(
-        "docker",
-        [
-          "compose",
-          "-p",
-          `slack-tag-${name}`,
-          "-f",
-          join(deploy, "project.yaml"),
-          "--env-file",
-          stored.passwordFile!,
-          "up",
-          "-d",
-        ],
-        { env },
-      );
+      if (config.onboarding!.start === "systemd") {
+        await exec("systemctl", [
+          "start",
+          "--no-ask-password",
+          `slack-tag-project@${name}.service`,
+        ]);
+      } else {
+        const env = {
+          ...Object.fromEntries(Object.entries(process.env).filter(([key]) => PASSED.test(key))),
+          SLACK_TAG_STATE_DIR: dirname(configPath),
+          SLACK_TAG_PROJECTS_ROOT: root,
+        };
+        await exec("sh", [join(deploy, "start-project.sh"), name], { env });
+      }
       await show(`✅ Container \`slack-tag-${name}\` started on port ${port}`);
 
       step = "Waiting for OpenCode";
