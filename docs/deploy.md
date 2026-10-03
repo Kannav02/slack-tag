@@ -32,7 +32,19 @@ install -d -m 2750 -o slack-tag -g 1000 /var/lib/slack-tag/inbox
 3. Fill the empty values. The Slack tokens go only in `bridge.env`, and the Go key only in `proxy.env`. Each project gets its own server password (for example `openssl rand -hex 32`): put it in that project's env file (`alpha.env`) as `OPENCODE_SERVER_PASSWORD`, and in `bridge.env` under the name its channel's `passwordEnv` gives (`ALPHA_SERVER_PASSWORD`). The bridge refuses to start if two channels share a password. Leave the env files `root`-owned with mode `0600`: systemd reads `bridge.env` before switching to the `slack-tag` user, so the bridge itself cannot reread it. Keep `config.json` owned by `slack-tag` with mode `0600`.
 
    Project containers never receive the Go key. Their OpenCode config sends model requests to the internal `key-proxy` service, which replaces the placeholder credential with the real key and forwards only to `https://opencode.ai/zen/go/v1`.
-4. To register projects from Slack, add the `onboarding` section from `config/example.json` and see [project mapping](project-mapping.md). For each channel connected by hand, run `deploy/prepare-project.sh <project folder>`, create its upload inbox `/var/lib/slack-tag/inbox/<channel name>` owned by the bridge's user (`install -d -m 0755 -o <bridge user> …`) before starting its container, create its env file as in step 2, give it a service in `deploy/compose.yaml` (copy `beta`, with its own env file, network and `/inbox` mount, and add that network to `key-proxy`), and add it to `/var/lib/slack-tag/config.json` in the shape of `config/example.json`, with `serverDir` set to `/project` and `opencodeUrl` set to the service's host port.
+4. To register projects from Slack, add the `onboarding` section from `config/example.json` (with `"start": "systemd"`) and see [project mapping](project-mapping.md). The bridge's `slack-tag` user has no Docker access, so it asks systemd to start each registered project as root through `deploy/start-project.sh`, which checks the project's env file before running `docker compose`. Install that path once (polkit 0.106 or later, for JavaScript rules; Ubuntu 24.04 and Debian 12 qualify):
+
+   ```bash
+   install -m 0644 deploy/slack-tag-project@.service /etc/systemd/system/
+   install -m 0644 deploy/50-slack-tag.rules /etc/polkit-1/rules.d/
+   printf 'SLACK_TAG_PROJECTS_ROOT=/srv/slack-tag/projects\nSLACK_TAG_RUNTIME=runsc\n' > /etc/slack-tag/registration.env
+   chmod 0600 /etc/slack-tag/registration.env
+   systemctl daemon-reload
+   ```
+
+   `SLACK_TAG_PROJECTS_ROOT` must match `onboarding.projectsRoot`. `/opt/slack-tag` must stay root-owned and not writable by `slack-tag`, because root runs `deploy/start-project.sh` from it. Check the rule with `sudo -u slack-tag systemctl start --no-ask-password slack-tag-project@nonexistent.service`: it should fail as a job (`journalctl -u slack-tag-project@nonexistent` shows "no env file"), not with "Access denied". Any other unit, or `stop`, must still say "Access denied".
+
+   For each channel connected by hand, run `deploy/prepare-project.sh <project folder>`, create its upload inbox `/var/lib/slack-tag/inbox/<channel name>` owned by the bridge's user (`install -d -m 0755 -o <bridge user> …`) before starting its container, create its env file as in step 2, give it a service in `deploy/compose.yaml` (copy `beta`, with its own env file, network and `/inbox` mount, and add that network to `key-proxy`), and add it to `/var/lib/slack-tag/config.json` in the shape of `config/example.json`, with `serverDir` set to `/project` and `opencodeUrl` set to the service's host port.
 5. Write `deploy/.env` with the Compose variables, for example `ALPHA_PROJECT=/srv/slack-tag/projects/alpha` and `SLACK_TAG_RUNTIME=runsc`. It holds paths only, no secrets. Then start the containers. `restart: unless-stopped` brings them back after a reboot.
 
 ```bash

@@ -1,0 +1,13 @@
+# Starts one project registered from Slack, as root, through the checks in deploy/start-project.sh.
+# The bridge runs `systemctl start slack-tag-project@<name>.service`; deploy/50-slack-tag.rules lets it start
+# only units with this name, so it never needs Docker access itself. Install in /etc/systemd/system.
+[Unit]
+Description=Slack Tag registered project %i
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+# SLACK_TAG_PROJECTS_ROOT (required) and optional SLACK_TAG_RUNTIME, SLACK_TAG_IMAGE, PROXY_ENV_FILE: root-owned, never from the bridge.
+EnvironmentFile=/etc/slack-tag/registration.env
+ExecStart=/bin/sh /opt/slack-tag/deploy/start-project.sh %i

@@ -19,7 +19,14 @@ export type Channel = StoredChannel & {
   inboxDir: string;
   serverInboxDir: string;
 };
-export type Onboarding = { projectsRoot: string; model: string; firstPort?: number };
+// start: "systemd" asks systemd to run deploy/start-project.sh as root (production, see docs/deploy.md);
+// "script" (the default) runs it directly as the bridge's user, which then needs Docker access (development).
+export type Onboarding = {
+  projectsRoot: string;
+  model: string;
+  firstPort?: number;
+  start?: "script" | "systemd";
+};
 export type Config = {
   ownerUserId: string;
   approvalTimeoutMinutes: number;
@@ -37,6 +44,8 @@ export function loadConfig(path: string): Config {
     throw new Error("config needs ownerUserId and channels");
   if (config.onboarding && (!config.onboarding.projectsRoot || !config.onboarding.model))
     throw new Error("onboarding needs projectsRoot and model");
+  if (config.onboarding?.start && !["script", "systemd"].includes(config.onboarding.start))
+    throw new Error('onboarding.start must be "script" or "systemd"');
   const channels: Record<string, Channel> = {};
   for (const [id, channel] of Object.entries(config.channels))
     channels[id] = prepareChannel(path, id, channel);
