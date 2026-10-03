@@ -18,7 +18,7 @@ Start a channel container as `docs/deploy.md` describes, with the same `OPENCODE
 
 ```bash
 deploy/prepare-project.sh /srv/demo/alpha
-ALPHA_PROJECT=/srv/demo/alpha ALPHA_ENV_FILE=/path/to/alpha.env SLACK_TAG_RUNTIME=runsc \
+ALPHA_PROJECT=/srv/demo/alpha ALPHA_INBOX=/tmp/slack-tag-demo/state/inbox/demo ALPHA_ENV_FILE=/path/to/alpha.env SLACK_TAG_RUNTIME=runsc \
   docker compose -f deploy/compose.yaml up -d --build alpha
 OPENCODE_API_KEY=<key> OPENCODE_SERVER_PASSWORD=<same password> DEMO_PROJECT=/srv/demo/alpha \
   OPENCODE_URL=http://127.0.0.1:4101 SERVER_DIR=/project demo/run.sh
@@ -32,7 +32,7 @@ OPENCODE_API_KEY=<key> OPENCODE_SERVER_PASSWORD=<same password> DEMO_PROJECT=/sr
 | `Write three short paragraphs about herons.` in that thread | A longer streamed reply in the same session. |
 | `@OpenCode use the shell to run exactly: touch approved.txt, then reply DONE` | The command runs automatically under policy version 2; `approved.txt` appears in the side panel. |
 | Ask it to run `sudo touch /tmp/slack-tag-denied` | The hard block rejects the command; independently check that no file was created. |
-| Attach a PNG with `@OpenCode what colour is this image? One word.` | The file lands in `.slack-tag/inbox/<thread>/`, and the model answers. |
+| Attach a PNG with `@OpenCode what colour is this image? One word.` | The file lands in `/tmp/slack-tag-demo/state/inbox/demo/<thread>/`, outside the project, and the model answers. |
 | `@OpenCode` as "Other user", or in `#unmapped` | An ephemeral owner-only refusal, or "not mapped". |
 
 The fake Slack page approximates rendering. Verify Markdown visually in a development Slack workspace before claiming real Slack rendering works.

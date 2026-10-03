@@ -180,10 +180,19 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
   }
 
   async function click(userId: string, decision: "once" | "reject", value: string, channelId: string, threadTs?: string) {
-    const { sessionId, requestId } = JSON.parse(value) as { sessionId: string; requestId: string }
     const refuse = (text: string) => slack.ephemeral(channelId, userId, threadTs, text)
     if (userId !== config.ownerUserId) return refuse("Only the owner can approve or reject actions.")
+    let parsed: { sessionId?: unknown; requestId?: unknown }
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return console.error("click ignored: malformed button value")
+    }
+    const { sessionId, requestId } = parsed ?? {}
+    if (typeof sessionId !== "string" || typeof requestId !== "string") return console.error("click ignored: malformed button value")
     const row = db.approval(requestId)
+    // The button must sit in the thread where the bridge asked.
+    if (row && (row.channel_id !== channelId || row.thread_ts !== threadTs)) return refuse("This button does not belong to this thread.")
     if (!row || row.session_id !== sessionId || !db.claim(requestId, decision === "once" ? "approved" : "rejected")) {
       return refuse("This request was already decided.")
     }
