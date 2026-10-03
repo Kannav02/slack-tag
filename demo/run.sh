@@ -9,7 +9,7 @@ export OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-$(openssl rand -hex 
 : "${OPENCODE_API_KEY:?set OPENCODE_API_KEY to the OpenCode Go key}"
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null || true' EXIT
-mkdir -p "$work" "$DEMO_PROJECT"
+mkdir -p "$work/state" "$DEMO_PROJECT"
 
 if [ ! -e "$DEMO_PROJECT/facts.txt" ]; then
   echo "End every reply with the word PINEAPPLE." > "$DEMO_PROJECT/AGENTS.md"
@@ -32,7 +32,7 @@ if [ -z "${OPENCODE_URL:-}" ]; then
   for _ in $(seq 100); do curl -s -o /dev/null -u "opencode:$OPENCODE_SERVER_PASSWORD" "$OPENCODE_URL/api/model" && break; sleep 0.3; done
 fi
 
-cat > "$work/config.json" <<EOF
+cat > "$work/state/config.json" <<EOF
 {
   "ownerUserId": "UOWNER",
   "approvalTimeoutMinutes": 30,
@@ -42,6 +42,7 @@ cat > "$work/config.json" <<EOF
       "projectDir": "$DEMO_PROJECT",
       "serverDir": "${SERVER_DIR:-$DEMO_PROJECT}",
       "opencodeUrl": "$OPENCODE_URL",
+      "passwordEnv": "OPENCODE_SERVER_PASSWORD",
       "model": "${MODEL:-opencode-go/kimi-k2.7-code}"
     }
   }
@@ -53,4 +54,4 @@ pids+=($!)
 sleep 1
 cd "$root/bridge"
 SLACK_API_URL=http://127.0.0.1:${FAKE_SLACK_PORT:-3000}/api/ SLACK_BOT_TOKEN=xoxb-demo SLACK_APP_TOKEN=xapp-demo \
-  SLACK_TAG_CONFIG="$work/config.json" node --experimental-strip-types --experimental-sqlite --no-warnings src/main.ts
+  SLACK_TAG_CONFIG="$work/state/config.json" node --experimental-strip-types --experimental-sqlite --no-warnings src/main.ts

@@ -89,11 +89,21 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     Object.assign(run, { text: "", parts: [], lastEdit: 0 })
   }
 
-  async function ask(request: Permission) {
+  // Subagent sessions are not mapped; their requests go to the nearest mapped ancestor's thread.
+  async function threadOf(client: Client, sessionId: string) {
+    for (let id: string | undefined = sessionId, depth = 0; id && depth < 5; depth++) {
+      const thread = db.threadBySession(id)
+      if (thread) return thread
+      id = (await client.session.get({ sessionID: id }).catch(() => undefined))?.parentID
+    }
+  }
+
+  async function ask(request: Permission, client: Client) {
     const known = db.approval(request.id)
     if (known?.message_ts) return
-    const thread = db.threadBySession(request.sessionID)
-    if (!thread) return
+    const thread = known ? { channel_id: known.channel_id, thread_ts: known.thread_ts } : await threadOf(client, request.sessionID)
+    // Nobody can approve a request without a thread, so it is refused rather than left waiting.
+    if (!thread) return decide(client, request.sessionID, request.id, "reject").catch(() => undefined)
     const summary = `*Approval needed:* ${escape(request.action)}\n\`\`\`${escape(request.resources.join("\n"))}\`\`\``
     if (!known) {
       db.addApproval({ request_id: request.id, session_id: request.sessionID, channel_id: thread.channel_id, thread_ts: thread.thread_ts, summary, asked_at: Date.now() })
@@ -114,9 +124,9 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     }
   }
 
-  async function apply(event: AgentEvent) {
+  async function apply(event: AgentEvent, client: Client) {
     const data = event.data ?? {}
-    if (event.type === "permission.asked") return ask(data as Permission)
+    if (event.type === "permission.asked") return ask(data as Permission, client)
     const run = typeof data.sessionID === "string" ? runOf(data.sessionID) : undefined
     if (!run) return
     switch (event.type) {
@@ -178,10 +188,19 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
   }
 
   async function click(userId: string, decision: "once" | "reject", value: string, channelId: string, threadTs?: string) {
-    const { sessionId, requestId } = JSON.parse(value) as { sessionId: string; requestId: string }
     const refuse = (text: string) => slack.ephemeral(channelId, userId, threadTs, text)
     if (userId !== config.ownerUserId) return refuse("Only the owner can approve or reject actions.")
+    let parsed: { sessionId?: unknown; requestId?: unknown }
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return console.error("click ignored: malformed button value")
+    }
+    const { sessionId, requestId } = parsed ?? {}
+    if (typeof sessionId !== "string" || typeof requestId !== "string") return console.error("click ignored: malformed button value")
     const row = db.approval(requestId)
+    // The button must sit in the thread where the bridge asked.
+    if (row && (row.channel_id !== channelId || row.thread_ts !== threadTs)) return refuse("This button does not belong to this thread.")
     if (!row || row.session_id !== sessionId || !db.claim(requestId, decision === "once" ? "approved" : "rejected")) {
       return refuse("This request was already decided.")
     }
@@ -223,7 +242,7 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
         for (const row of db.pendingApprovals(thread.session_id)) {
           if (!ids.has(row.request_id) && db.claim(row.request_id, "expired")) await settle(row, "No longer pending after a restart")
         }
-        for (const request of live) await ask(request)
+        for (const request of live) await ask(request, client)
       }
     }
   }
@@ -231,7 +250,7 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
   return {
     handle,
     click,
-    onEvent: (event: AgentEvent) => void serial(() => apply(event)),
+    onEvent: (event: AgentEvent, client: Client) => void serial(() => apply(event, client)),
     expire: () => serial(expire),
     recover: () => serial(recover),
   }
