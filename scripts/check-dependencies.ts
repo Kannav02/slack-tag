@@ -8,7 +8,9 @@ import plugin from "../plugin/index.ts";
 // Setup check only: no Slack connection, provider call, or project agent starts.
 const bridgeRequire = createRequire(new URL("../bridge/package.json", import.meta.url));
 const bolt: unknown = bridgeRequire("@slack/bolt");
-assert.ok(typeof bolt === "object" && bolt !== null && "App" in bolt && "SocketModeReceiver" in bolt);
+assert.ok(
+  typeof bolt === "object" && bolt !== null && "App" in bolt && "SocketModeReceiver" in bolt,
+);
 const { App, SocketModeReceiver } = bolt;
 assert.ok(plugin);
 assert.equal(process.versions.node.split(".")[0], "24", "Use Node 24");

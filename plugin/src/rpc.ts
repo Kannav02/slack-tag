@@ -1,5 +1,5 @@
-import { Rpc } from "@opencode/plugin/rpc"
-import { PLUGIN_VERSION, POLICY_VERSION } from "./policy.ts"
+import { Rpc } from "@opencode/plugin/rpc";
+import { PLUGIN_VERSION, POLICY_VERSION } from "./policy.ts";
 
 export const definition = Rpc.define({
   id: "slack-tag",
@@ -18,8 +18,8 @@ export const definition = Rpc.define({
     },
   },
   events: {},
-})
+});
 
 export function status() {
-  return { pluginVersion: PLUGIN_VERSION, policyVersion: POLICY_VERSION }
+  return { pluginVersion: PLUGIN_VERSION, policyVersion: POLICY_VERSION };
 }
