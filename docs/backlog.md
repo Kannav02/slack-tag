@@ -10,7 +10,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-2 | Destructive actions ask the owner and fail closed | High | Done (policy version 3) |
 | SEC-3 | Slack input and output hardening | High | Done (simulated Slack) |
 | SEC-4 | Bridge runs as a dedicated restricted user | High | Planned (needs VPS) |
-| SEC-5 | Keep secrets out of agent reach; isolate projects | High | Research/design |
+| SEC-5 | Keep secrets out of agent reach; isolate projects | High | Done in PRs, VPS pending |
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Planned |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Planned |
@@ -78,6 +78,8 @@ Threat model: treat the agent as untrusted. It reads project files, web pages an
 ### SEC-5: Keep secrets out of agent reach; isolate projects
 
 **Done (PR #6):** the Go key lives only in the `key-proxy` container; each project has its own server password and Compose network, and the bridge refuses a reused password. Verified with real containers on Docker Desktop, not on the VPS.
+
+**Done (SEC-5 PR), decided 2026-10-02:** agent shells run as `agent` (uid 1001) through `agent-shell`, so they cannot read the server's environment, memory or `/data`, and cannot approve their own permission requests. Project containers run under gVisor by default. `deploy/firewall.sh` blocks the metadata address and the host for project networks; other internet access stays open by decision (no allowlist). Verified on Docker Desktop under runc and under gVisor in Docker-in-Docker, not on the VPS. CPU/disk limits remain open.
 
 **Background:** project containers previously got `OPENCODE_API_KEY` and a shared `OPENCODE_SERVER_PASSWORD` from one env file. The plugin strips them only from agent shell environments. Containers share the default Compose network and have unrestricted egress. Runtime defaults to `runc` unless `SLACK_TAG_RUNTIME=runsc`.
 
