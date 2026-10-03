@@ -24,7 +24,7 @@ const slackCall = z.looseObject({
   text: z.string().optional(),
   ts: z.string().optional(),
   thread_ts: z.string().optional(),
-  blocks: z.preprocess((value) => (typeof value === "string" ? JSON.parse(value) : value), blockList).optional(),
+  blocks: z.preprocess((value): unknown => (typeof value === "string" ? JSON.parse(value) : value), blockList).optional(),
 })
 const sessionCall = z.looseObject({ location: z.object({ directory: z.string() }), model: z.object({ providerID: z.string(), id: z.string() }) })
 const promptCall = z.looseObject({ text: z.string(), delivery: z.string(), files: z.array(z.object({ uri: z.string(), name: z.string() })) })
@@ -37,7 +37,7 @@ function portOf(server: Server) {
 }
 
 // Start the production process, replace only external services, and inspect messages plus persisted state.
-test("Slack routing, queued prompts, Markdown replies, and session persistence", { timeout: 30_000 }, async (t) => {
+await test("Slack routing, queued prompts, Markdown replies, and session persistence", { timeout: 30_000 }, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-integration-"))
   const messages: (z.infer<typeof slackCall> & { method: string | undefined; ts: string })[] = []
   const sessions: (z.infer<typeof sessionCall> & { id: string })[] = []
@@ -49,7 +49,6 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   let child: Bridge | undefined
   let socket: WebSocket | undefined
   let stream: ServerResponse | undefined
-  let db: DatabaseSync | undefined
   let logs = ""
   let sequence = 0
   let base = ""
@@ -127,7 +126,6 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   }
   t.after(async () => {
     await stop()
-    db?.close()
     for (const ws of wss.clients) ws.terminate()
     for (const res of streams) res.end()
     wss.close()
@@ -205,7 +203,7 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
   }))
   await start()
   const store = new DatabaseSync(join(state, "slack-tag.sqlite"), { readOnly: true })
-  db = store
+  t.after(() => store.close())
 
   send({ ts: "100.1", user: "UOTHER" })
   await until(() => messages.some((m) => m.method === "chat.postEphemeral"))
@@ -327,7 +325,7 @@ test("Slack routing, queued prompts, Markdown replies, and session persistence",
 })
 
 // Two fake OpenCode servers record which password reached them; Slack is never reached.
-test("each channel's server gets its own password, and a reused password stops startup", { timeout: 20_000 }, async (t) => {
+await test("each channel's server gets its own password, and a reused password stops startup", { timeout: 20_000 }, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-passwords-"))
   const seen: Record<"A" | "B", string[]> = { A: [], B: [] }
   const servers = await Promise.all((["A", "B"] as const).map(async (name) => {
@@ -373,7 +371,7 @@ test("each channel's server gets its own password, and a reused password stops s
   assert.deepEqual(seen.B, [])
 })
 
-test("a project folder that is /, holds, or sits inside the bridge state folder stops startup", { timeout: 20_000 }, async (t) => {
+await test("a project folder that is /, holds, or sits inside the bridge state folder stops startup", { timeout: 20_000 }, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-projectdir-"))
   const state = join(work, "state")
   await mkdir(state)

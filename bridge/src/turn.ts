@@ -7,10 +7,10 @@ const LIMIT = 3500
 const EDIT_MS = 1000
 
 export type SlackApi = {
-  post(channel: string, threadTs: string, text: string, blocks?: object[]): Promise<string>
-  update(channel: string, ts: string, text: string, blocks?: object[]): Promise<void>
-  ephemeral(channel: string, user: string, threadTs: string | undefined, text: string): Promise<void>
-  download(url: string): Promise<Response>
+  post: (channel: string, threadTs: string, text: string, blocks?: object[]) => Promise<string>
+  update: (channel: string, ts: string, text: string, blocks?: object[]) => Promise<void>
+  ephemeral: (channel: string, user: string, threadTs: string | undefined, text: string) => Promise<void>
+  download: (url: string) => Promise<Response>
 }
 
 export type Incoming = {
@@ -37,11 +37,28 @@ function blocks(summary: string, value?: string) {
   return [section, { type: "actions", elements: [button("approve", "Approve", "primary"), button("reject", "Reject", "danger")] }]
 }
 
+// Button values come back from Slack, so read them as untrusted JSON.
+function buttonValue(value: string): { sessionId: string; requestId: string } | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== "object" || parsed === null || !("sessionId" in parsed) || !("requestId" in parsed)) return undefined
+  const { sessionId, requestId } = parsed
+  return typeof sessionId === "string" && typeof requestId === "string" ? { sessionId, requestId } : undefined
+}
+
 export function createRouter(config: Config, db: Db, slack: SlackApi, channels: Map<string, Runtime>) {
   const runs = new Map<string, Run>()
   let chain = Promise.resolve()
-  const serial = (task: () => Promise<unknown>) => {
+  // Run tasks one at a time; a failed task is logged and never stops the queue.
+  const enqueue = (task: () => Promise<unknown>) => {
     chain = chain.then(async () => void (await task())).catch((error: unknown) => console.error("bridge task failed:", error instanceof Error ? error.message : "error"))
+  }
+  const serial = (task: () => Promise<unknown>) => {
+    enqueue(task)
     return chain
   }
 
@@ -59,7 +76,7 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
     if (!force && Date.now() - run.lastEdit < EDIT_MS) {
       run.timer ??= setTimeout(() => {
         run.timer = undefined
-        void serial(() => flush(run, true))
+        enqueue(() => flush(run, true))
       }, EDIT_MS)
       return
     }
@@ -114,19 +131,18 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
   }
 
   async function apply(event: AgentEvent) {
-    const data = event.data ?? {}
-    if (event.type === "permission.asked") return ask(data as Permission)
-    const run = typeof data.sessionID === "string" ? runOf(data.sessionID) : undefined
+    if (event.type === "permission.asked") return ask(event.data)
+    const run = runOf(event.data.sessionID)
     if (!run) return
     switch (event.type) {
       case "session.retry.scheduled":
-        run.retryAt = data.at
+        run.retryAt = event.data.at
         return
       case "session.inbox.delivered":
         if (run.text) await finish(run, "done")
         return
       case "session.text.delta":
-        run.text += data.delta ?? ""
+        run.text += event.data.delta
         return flush(run)
       case "session.execution.succeeded":
         return finish(run, "done")
@@ -134,9 +150,9 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
         return finish(
           run,
           "failed",
-          data.error?.status === 429
+          event.data.error.status === 429
             ? `The provider rate limit was hit. Retry after ${run.retryAt ? new Date(run.retryAt).toISOString() : "later"}.`
-            : `The run failed: ${data.error?.message ?? "the agent could not complete the request."}`,
+            : `The run failed: ${event.data.error.message || "the agent could not complete the request."}`,
         )
       case "session.execution.interrupted":
         return finish(run, "failed", "The run was interrupted.")
@@ -172,14 +188,9 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
   async function click(userId: string, decision: "once" | "reject", value: string, channelId: string, threadTs?: string) {
     const refuse = (text: string) => slack.ephemeral(channelId, userId, threadTs, text)
     if (userId !== config.ownerUserId) return refuse("Only the owner can approve or reject actions.")
-    let parsed: { sessionId?: unknown; requestId?: unknown }
-    try {
-      parsed = JSON.parse(value)
-    } catch {
-      return console.error("click ignored: malformed button value")
-    }
-    const { sessionId, requestId } = parsed ?? {}
-    if (typeof sessionId !== "string" || typeof requestId !== "string") return console.error("click ignored: malformed button value")
+    const button = buttonValue(value)
+    if (!button) return console.error("click ignored: malformed button value")
+    const { sessionId, requestId } = button
     const row = db.approval(requestId)
     // The button must sit in the thread where the bridge asked.
     if (row && (row.channel_id !== channelId || row.thread_ts !== threadTs)) return refuse("This button does not belong to this thread.")
@@ -232,7 +243,7 @@ export function createRouter(config: Config, db: Db, slack: SlackApi, channels: 
   return {
     handle,
     click,
-    onEvent: (event: AgentEvent) => void serial(() => apply(event)),
+    onEvent: (event: AgentEvent) => enqueue(() => apply(event)),
     expire: () => serial(expire),
     recover: () => serial(recover),
   }

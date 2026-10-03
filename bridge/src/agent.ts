@@ -1,8 +1,19 @@
-import { OpenCode } from "@opencode/client"
+import { OpenCode, type OpenCodeEvent } from "@opencode/client"
 import { POLICY_VERSION } from "../../plugin/src/policy.ts"
 import { definition } from "../../plugin/src/rpc.ts"
 
-export type AgentEvent = { type: string; data?: Record<string, any> }
+const handledEvents = [
+  "permission.asked",
+  "session.retry.scheduled",
+  "session.inbox.delivered",
+  "session.text.delta",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+] as const
+const handled = new Set<string>(handledEvents)
+
+export type AgentEvent = Extract<OpenCodeEvent, { type: (typeof handledEvents)[number] }>
 export type Permission = { id: string; sessionID: string; action: string; resources: readonly string[] }
 export type Client = ReturnType<typeof connect>
 
@@ -41,17 +52,21 @@ export async function prompt(client: Client, sessionID: string, text: string, fi
   await client.session.prompt({ sessionID, text, files, delivery: "queue" })
 }
 
-export function subscribe(client: Client, onEvent: (event: AgentEvent) => void) {
-  void (async () => {
-    for (;;) {
-      try {
-        for await (const event of client.event.subscribe()) onEvent(event as AgentEvent)
-      } catch (error) {
-        console.error("event stream failed:", error instanceof Error ? error.message : "error")
-      }
-      await new Promise((resolve) => setTimeout(resolve, 5000))
+const isHandled = (event: OpenCodeEvent): event is AgentEvent => handled.has(event.type)
+
+async function stream(client: Client, onEvent: (event: AgentEvent) => void) {
+  for (;;) {
+    try {
+      for await (const event of client.event.subscribe()) if (isHandled(event)) onEvent(event)
+    } catch (error) {
+      console.error("event stream failed:", error instanceof Error ? error.message : "error")
     }
-  })()
+    await new Promise((resolve) => setTimeout(resolve, 5000))
+  }
+}
+
+export function subscribe(client: Client, onEvent: (event: AgentEvent) => void) {
+  stream(client, onEvent).catch((error: unknown) => console.error("event stream stopped:", error instanceof Error ? error.message : "error"))
 }
 
 export async function pending(client: Client, sessionID: string): Promise<readonly Permission[]> {
