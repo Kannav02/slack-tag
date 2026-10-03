@@ -1,0 +1,83 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "node"],
+  "options": {
+    "typeAware": true,
+    "reportUnusedDisableDirectives": "error"
+  },
+  "categories": {
+    "correctness": "error"
+  },
+  "ignorePatterns": ["spike/**", "demo/**", "deploy/**", "docs/**", "**/node_modules/**"],
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-call": "error",
+
+    "typescript/no-floating-promises": ["error", { "ignoreVoid": false }],
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+
+    "typescript/switch-exhaustiveness-check": [
+      "error",
+      { "considerDefaultExhaustiveForUnions": false }
+    ],
+
+    "typescript/ban-ts-comment": [
+      "error",
+      {
+        "ts-ignore": true,
+        "ts-nocheck": true,
+        "ts-expect-error": "allow-with-description",
+        "minimumDescriptionLength": 10
+      }
+    ],
+
+    "eqeqeq": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+    ],
+
+    "typescript/no-require-imports": "error",
+    "import/no-commonjs": "error",
+    "import/no-dynamic-require": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          { "name": "node:test", "importNames": ["mock"], "message": "Use real collaborators; fake only external systems." },
+          { "name": "node:module", "importNames": ["createRequire"], "message": "Use static imports." }
+        ],
+        "patterns": [
+          {
+            "group": ["sinon", "sinon/*", "testdouble", "jest-mock", "@jest/globals", "vitest", "nock", "proxyquire", "esmock", "msw", "msw/*"],
+            "message": "Use real collaborators; fake only external systems."
+          }
+        ]
+      }
+    ],
+    "no-restricted-properties": [
+      "error",
+      { "property": "mock", "message": "Use real collaborators; fake only external systems." },
+      { "property": "spyOn", "message": "Assert observable results, not internal calls." },
+      { "property": "mockImplementation", "message": "Use real collaborators; fake only external systems." },
+      { "property": "mockReturnValue", "message": "Use real collaborators; fake only external systems." },
+      { "property": "mockResolvedValue", "message": "Use real collaborators; fake only external systems." },
+      { "property": "mockRejectedValue", "message": "Use real collaborators; fake only external systems." }
+    ],
+    "no-restricted-globals": [
+      "error",
+      { "name": "jest", "message": "Use real collaborators; fake only external systems." },
+      { "name": "vi", "message": "Use real collaborators; fake only external systems." },
+      { "name": "sinon", "message": "Use real collaborators; fake only external systems." }
+    ],
+
+    "complexity": ["warn", { "max": 10 }]
+  }
+}

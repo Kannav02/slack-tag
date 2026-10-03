@@ -5,7 +5,8 @@
 - Node.js 24 + npm. Clean setup: `bash scripts/setup-cloud.sh`.
 - Required checks: `npm run check`. One feature test: `node --test tests/bridge.integration.test.ts`.
 - Bridge entrypoint: `npm --prefix bridge start` with development variables from `docs/cloud-development.md`.
-- Do not use historical Bun scaffold commands. No formatter/linter is configured; do not claim otherwise.
+- Lint: `npm run lint` (Oxlint with type-aware rules, `.oxlintrc.json`); keep `npm run typecheck` separate. No formatter is configured yet.
+- Do not use historical Bun scaffold commands.
 
 ## Boundaries
 

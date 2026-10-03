@@ -17,7 +17,7 @@ function portOf(server: Server) {
 }
 
 // Start the real proxy process against a fake OpenCode Go upstream and observe both sides.
-test("key proxy swaps in the Go key, streams replies, and only forwards to its upstream", { timeout: 20_000 }, async (t) => {
+await test("key proxy swaps in the Go key, streams replies, and only forwards to its upstream", { timeout: 20_000 }, async (t) => {
   const received: { url: string | undefined; headers: IncomingHttpHeaders; body: string }[] = []
   const upstream = createServer((req, res) => {
     text(req)

@@ -16,5 +16,4 @@ jobs:
             bridge/package-lock.json
             plugin/package-lock.json
       - run: bash scripts/setup-cloud.sh
-      - run: npm run typecheck
-      - run: npm test
+      - run: npm run check

@@ -35,7 +35,7 @@ function gitSubcommand(words: string[], start: number): { sub?: string; aliased:
   for (let i = start + 1; i < words.length; i++) {
     const word = words[i]!
     // An alias set on the command line can rename push.
-    if (/^--config-env=alias\./.test(word) || ((word === "-c" || word === "--config-env") && /^alias\./.test(words[i + 1] ?? ""))) aliased = true
+    if (word.startsWith("--config-env=alias.") || ((word === "-c" || word === "--config-env") && (words[i + 1] ?? "").startsWith("alias."))) aliased = true
     if (GIT_VALUE_OPTIONS.has(word)) i++
     else if (!word.startsWith("-")) return { sub: word, aliased }
   }

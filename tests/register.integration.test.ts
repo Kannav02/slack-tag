@@ -38,7 +38,7 @@ function portOf(server: Server) {
 }
 
 // The real bridge and prepare-project.sh run; Slack, OpenCode and the docker CLI are stand-ins.
-test("registering a project folder from Slack", { timeout: 30_000 }, async (t) => {
+await test("registering a project folder from Slack", { timeout: 30_000 }, async (t) => {
   const work = await realpath(await mkdtemp(join(tmpdir(), "slack-tag-register-")))
   const code = join(work, "code")
   // The bridge state folder must stay outside every project, so the config gets its own folder.
