@@ -4,7 +4,7 @@ Current snapshot: 2026-10-03, covering `main` after SEC-1 to SEC-5, Slack projec
 
 Threat model: the agent is untrusted. It reads project files, web pages and attachments that may carry injected instructions, and it runs commands on its own. The questions here are what each component can reach and what actually stops it.
 
-Main `920460a`, including SEC-1 to SEC-5, was deployed to the VPS on 2026-10-03 with owner authorization. Host/container checks and real Slack mention/reply, approve-once, and per-thread model switching passed; uploads and rejection remain unverified live. See the VPS security migration and manual Slack checks in [findings](findings.md). Onboarding remains unconfigured because folder discovery/preparation is incompatible with the hardened bridge unit; Slack registration returns that it is not configured.
+Main `49c4a42` was deployed to the VPS on 2026-10-03 Toronto (2026-10-04 UTC) with owner authorization. Registration through `#social` connected the disposable `deploy-verification` project under `/srv/slack-tag/projects`. Real Slack mention/reply, approve-once, per-thread model switching, retained session memory and queue waiting/draining passed. Live uploads, rejection and messages from two distinct users remain unverified. See [findings](findings.md) for evidence and the MiniMax response-format issue.
 
 ## Evidence labels
 
@@ -57,7 +57,7 @@ One channel maps to one project and one server; each thread is one session on it
 
 ## Trust zones
 
-1. **Owner**: the only Slack user the bridge acts for (`ownerUserId`), in the workspace the bot token belongs to.
+1. **Owner and members**: workspace members may prompt mapped projects and run Slack commands; only the owner (`ownerUserId`) may register projects and approve actions.
 2. **Slack**: delivers events and file URLs. Trusted to say who sent a message.
 3. **Bridge host**: the bridge, its state and credentials, Docker. Fully trusted.
 4. **OpenCode server**: holds its own server password; trusted to enforce the plugin's decisions.
@@ -70,10 +70,10 @@ One channel maps to one project and one server; each thread is one session on it
 
 | Control | Status |
 | --- | --- |
-| Only the owner's messages start or continue sessions; others get an ephemeral refusal and no session is created. | **Tested**, **Live** for the owner path |
-| Owner replies in a mapped thread continue without a mention. | **Tested**, **Live** |
+| Workspace members' messages can start or continue sessions in mapped channels. | **Tested**, **Live** for the owner path; two-user live test pending |
+| Member replies in a mapped thread continue without a mention. | **Tested**, **Live** for the owner path |
 | The bridge reads its workspace from `auth.test` and ignores events, approval clicks and folder choices from any other workspace. | **Tested** (SEC-3) |
-| Only the owner can register a project, run Slack commands, or click approval buttons. | **Tested** |
+| Only the owner can register a project or click approval buttons. | **Tested**, **Live** for the owner path |
 | Approval button values are parsed defensively and must come from the thread where the bridge asked; malformed or misplaced clicks are ignored. | **Tested** (SEC-3) |
 | The bot token is sent only to `https://files.slack.com`; redirects to any other origin are refused. | **Tested** (SEC-3) |
 
@@ -100,11 +100,10 @@ One channel maps to one project and one server; each thread is one session on it
 | Uploads go to the bridge-owned `<state dir>/inbox/<channel>/<thread>/` with a sanitized name, a 20 MB cap and a type check; a symlinked inbox folder is refused. The bridge no longer writes into the project or `.git/info/exclude`. | **Tested** (SEC-1) |
 | A `projectDir` that is `/`, contains, or sits inside the state folder stops startup and registration. | **Tested** (SEC-1) |
 | Registration only offers direct, non-symlink subfolders of `projectsRoot` with a safe name. | **Tested** |
-| The bridge never writes to a project folder. `deploy/start-project.sh` prepares it as uid 1000 (not root), refuses symlinks at the paths it writes, and removes access for other users, so the bridge user can list `projectsRoot` but not open a project. | **Tested** (as root and as a normal user); real systemd not verified |
+| The bridge never writes to a project folder. `deploy/start-project.sh` prepares it as uid 1000 (not root), refuses symlinks at the paths it writes, and removes access for other users, so the bridge user can list `projectsRoot` but not open a project. | **Tested** (as root and as a normal user), **Live** preparation through systemd; symlink rejection tested |
 | Registration runs `prepare-project.sh` and `docker compose` without the Slack tokens or other channels' passwords in the child environment. | **Tested** |
 | The bridge runs as the dedicated `slack-tag` user with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, write access only to the state folder, and no capabilities. | **Real** (SEC-4, disposable systemd container) |
-| Registration does not give the bridge Docker access (root-equivalent). With `onboarding.start: "systemd"` the bridge may only `systemctl start slack-tag-project@<name>`, allowed by a polkit rule; root then runs `deploy/start-project.sh`, which checks the bridge-written env file and passes `docker compose` only checked values. | **Tested** (PR #22), **VPS** (polkit authorization and missing-project rejection); real registration remains unverified |
-| Bridge-side registration discovery cannot see `/home/devuser/projects` with `ProtectHome=yes`, and bridge-side preparation cannot write projects with `ProtectSystem=strict`. The helper currently only starts Compose. | **Gap**: ONB-1; onboarding remains unconfigured on the VPS |
+| Registration does not give the bridge Docker access (root-equivalent). With `onboarding.start: "systemd"` the bridge may only `systemctl start slack-tag-project@<name>`, allowed by a polkit rule; root then runs `deploy/start-project.sh`, which checks the bridge-written env file and passes `docker compose` only checked values. | **Tested** (PR #22), **VPS** (polkit authorization and missing-project rejection), **Live** (`#social`, `deploy-verification`) |
 
 ### Agent → its container and project
 
@@ -164,4 +163,4 @@ Verified on 2026-10-03 (**VPS**); details and limits are in [findings](findings.
 - `docker inspect` shows `runsc` for every project container and an `st-` bridge name for every project network.
 - The bridge runs as `slack-tag`; `systemctl start slack-tag-project@<name>` works for it, while any other unit or `stop` is denied.
 
-The helper test used a missing project and an invalid unit name; a real registration was not completed. A real Slack prompt ran `id` after approve-once and reported uid 1001. Live uploads, rejection and project registration remain pending.
+The initial helper test used a missing project and an invalid unit name. Release `49c4a42` then completed real Slack registration of `deploy-verification` through systemd; its container uses `runsc` and a read-only root. A real Slack prompt ran `id` after approve-once and reported uid 1001. Live uploads, rejection and two-user messaging remain pending; registered cross-project network isolation still needs a direct connectivity test.

@@ -159,3 +159,18 @@ Used the native Slack UI in Kannav Work, against deployed `920460a`:
 - In the previously empty, unmapped `social` channel, added OpenCode and sent `@OpenCode register`. Its reply was `This channel is not mapped to a project, and project registration is not configured.` Registration is blocked by the missing production onboarding configuration; folder selection/container creation were not reached, and no project was registered. The sandbox incompatibility documented above still needs a fix before enabling onboarding.
 
 Screenshots of the smoke response, remembered phrase, model switch with continued inference, and registration blocker were saved as local verification artifacts. Upload handling, reject-button behavior and the other Slack commands were not exercised in this manual run.
+
+## Registration and queue deployment (2026-10-03 Toronto / 2026-10-04 UTC)
+
+Deployed `49c4a42` with owner authorization after all nine required checks passed against a clean source archive. Backups are under `/var/backups/slack-tag/20261004T014123Z-49c4a42`. Rebuilt the OpenCode 2.0.15 image and updated the bridge/helper while preserving the existing alpha project path, credentials and `deploy_alpha-data` volume. Enabled onboarding at `/srv/slack-tag/projects` with the systemd helper, without weakening the bridge sandbox.
+
+Manual verification through the native Slack composer and authenticated Slack browser UI:
+
+- `@OpenCode register` in `#social` offered `deploy-verification`. Selecting it prepared the folder, started the project on loopback port 4102, verified the safety plugin and saved the channel mapping. Its container reports runtime `runsc` and a read-only root.
+- A prompt in the registered project read its README and reported `Deployment verification`, `/project` and the correct thread marker. Switching that thread to `opencode-go/minimax-m3` succeeded; subsequent inference retained the marker. The MiniMax reply also included extra reasoning text despite the request for only the marker, so exact response formatting failed.
+- The existing alpha thread recalled `CEDAR-920460A` after the release, verifying its persisted session and continued inference.
+- A harmless `printf queue-first | cat` request waited for owner approval. A second alpha thread received `Queued: 1 ahead of this message in this project.` After approve-once, the first returned `queue-first` and the second returned `QUEUE-SECOND-49C4A42`, verifying queue draining across threads from one user.
+
+Registration, project response, model switching and queue screenshots were saved as local artifacts. Two distinct Slack users were not available for a live test; teammate acceptance is verified by the simulated-service tests only. Live uploads, rejection and registered cross-project connectivity were not tested in this run.
+
+Both bridge/firewall services and all four containers remained active at the final check. Removed `/etc/sudoers.d/slack-tag-deploy` and verified that passwordless sudo was denied.
