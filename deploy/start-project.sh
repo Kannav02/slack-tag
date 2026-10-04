@@ -1,5 +1,5 @@
 #!/bin/sh
-# Starts one project registered from Slack: docker compose with deploy/project.yaml.
+# Starts one project registered from Slack: prepares its folder, then docker compose with deploy/project.yaml.
 # On the VPS it runs as root under slack-tag-project@.service, which the bridge may start (polkit rule);
 # in development the bridge runs it directly. The bridge only names the project, and its env file is
 # bridge-written, so every value is checked here and nothing else from that file reaches Docker.
@@ -34,6 +34,14 @@ printf '%s' "$net" | grep -Eqx '[0-9]{1,3}' && [ "$net" -ge 1 ] && [ "$net" -le 
 printf '%s' "$password" | grep -Eqx '[0-9a-f]{48}' || fail "invalid server password"
 inbox="$state/inbox/$name"
 [ -d "$inbox" ] && [ ! -L "$inbox" ] || fail "upload inbox $inbox is missing"
+
+# Prepare the folder with the container user's rights, not root's: the agent may have planted symlinks in it.
+if [ "$(id -u)" = 0 ]; then
+  env -i PATH="$PATH" HOME=/nonexistent setpriv --reuid=1000 --regid=1000 --clear-groups \
+    sh "$deploy/prepare-project.sh" "$project"
+else
+  sh "$deploy/prepare-project.sh" "$project"
+fi
 
 # Docker sees only the checked values and the operator's own settings (unit EnvironmentFile or the developer's shell).
 set -- PATH="$PATH" HOME="${HOME:-/root}" SLACK_TAG_PROJECT="$project" SLACK_TAG_PORT="$port" \

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
   chmod,
+  chown,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -37,6 +39,13 @@ await test("start-project.sh starts only checked projects and passes Docker only
     await mkdir(dir, { recursive: true });
   }
   await symlink(outside, join(projects, "link"));
+  // As root, the script prepares the folder as uid 1000, which must be able to reach and own it.
+  const asRoot = process.getuid?.() === 0;
+  if (asRoot) {
+    await chmod(work, 0o755);
+    for (const dir of [join(projects, "app"), join(projects, "app", "deep")])
+      await chown(dir, 1000, 1000);
+  }
   await mkdir(join(work, "bin"));
   await writeFile(
     join(work, "bin", "docker"),
@@ -84,6 +93,14 @@ await test("start-project.sh starts only checked projects and passes Docker only
   await rm(join(state, "inbox", "app"), { recursive: true });
   assert.match(await start("app", envOf(join(projects, "app"))), /upload inbox .* is missing/);
   await mkdir(join(state, "inbox", "app"));
+  // A symlink the agent left in the project is refused, and nothing is written through it.
+  await symlink(join(outside, "planted"), join(projects, "app", "opencode.json"));
+  assert.match(
+    await start("app", envOf(join(projects, "app"))),
+    /opencode.json in .* is a symlink/,
+  );
+  await assert.rejects(lstat(join(outside, "planted")));
+  await rm(join(projects, "app", "opencode.json"));
   assert.deepEqual(await dockerCalls(), []);
 
   // A valid project starts; extra lines in the bridge-written env file never reach Docker.
@@ -93,6 +110,11 @@ await test("start-project.sh starts only checked projects and passes Docker only
   assert.deepEqual(await dockerCalls(), [
     `compose -p slack-tag-app -f ${join(root, "deploy/project.yaml")} --env-file /dev/null up -d`,
   ]);
+  // The folder is prepared before Docker mounts it, closed to other users, and as root owned by uid 1000.
+  const prepared = await lstat(join(projects, "app", "opencode.json"));
+  assert.ok(prepared.isFile());
+  if (asRoot) assert.equal(prepared.uid, 1000);
+  assert.equal((await lstat(join(projects, "app"))).mode & 0o007, 0);
   const dockerEnv = await readFile(join(work, "docker.env"), "utf8");
   for (const line of [
     `SLACK_TAG_PROJECT=${join(projects, "app")}`,
