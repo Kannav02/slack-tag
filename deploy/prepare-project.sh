@@ -1,7 +1,12 @@
 #!/bin/sh
 # Create the paths compose.yaml mounts read-only. Run before `docker compose up`.
+# deploy/start-project.sh runs it as uid 1000 (the container user) for projects registered from Slack.
 set -eu
 project=${1:?project directory}
+# An agent can leave symlinks in the project; never write through one.
+for path in .opencode .git .git/config .git/hooks opencode.json opencode.jsonc; do
+  [ ! -L "$project/$path" ] || { echo "$path in $project is a symlink" >&2; exit 1; }
+done
 mkdir -p "$project/.opencode"
 [ -e "$project/.git/config" ] || git -C "$project" init -q
 mkdir -p "$project/.git/hooks"
@@ -12,3 +17,5 @@ done
 chgrp -R 1000 "$project" 2>/dev/null || true
 chmod -R g+rwX "$project"
 find "$project" -type d -exec chmod g+s {} +
+# Other users, the bridge's included, may see the folder's name but not open it.
+chmod o-rwx "$project"

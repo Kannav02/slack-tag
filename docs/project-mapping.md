@@ -58,9 +58,9 @@ Use this for projects outside the registration folder, or when changing the orig
 
 Requires an `onboarding` section in `config.json` (see `config/example.json`): `projectsRoot` is the only folder whose direct subfolders can be registered, `model` is used for new projects, and `firstPort` (default 4102) is the lowest host port to allocate. Without it, `register` replies that registration is not configured. The `slack-tag-opencode:2.0.15` image must already be built by `deploy/compose.yaml`.
 
-1. Put the project folder in `projectsRoot` on the VPS, create a Slack channel and invite OpenCode.
+1. Put the project folder in `projectsRoot` on the VPS (`/srv/slack-tag/projects`, owned by uid 1000; see [deployment](deploy.md)), create a Slack channel and invite OpenCode.
 2. As the owner, post `@OpenCode register` in the channel. The bot lists the subfolders that no channel uses yet; symlinks and other entries are skipped.
-3. Choose a folder. The bot updates the message as it runs `deploy/prepare-project.sh`, starts the container, waits for OpenCode to answer with the safety plugin, and saves the channel. The channel works immediately; no bridge restart.
+3. Choose a folder. The bot updates the message as `deploy/start-project.sh` prepares the folder (`deploy/prepare-project.sh`, as uid 1000 when run as root) and starts the container; it then waits for OpenCode to answer with the safety plugin, and saves the channel. The channel works immediately; no bridge restart.
 
 What gets created for a folder `app-one`:
 

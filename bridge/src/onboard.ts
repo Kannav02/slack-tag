@@ -120,7 +120,7 @@ export function createOnboarding(
     const name = folder.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (name.length > 40)
       return show(`\`${folder}\` is too long for a project name (40 characters at most).`);
-    let step = "Preparing the folder";
+    let step = "Starting the project";
     try {
       await show(`Registering \`${folder}\`…`);
       const stored: StoredChannel = {
@@ -131,10 +131,6 @@ export function createOnboarding(
         passwordFile: join(stateDir, `${name}.env`),
         model: config.onboarding!.model,
       };
-      await exec("sh", [join(deploy, "prepare-project.sh"), projectDir]);
-      await show("✅ Folder prepared");
-
-      step = "Starting the container";
       const { port, password } = await envFor(name, projectDir);
       stored.opencodeUrl = `http://127.0.0.1:${port}`;
       const channel = prepareChannel(configPath, channelId, stored);
@@ -154,7 +150,7 @@ export function createOnboarding(
         };
         await exec("sh", [join(deploy, "start-project.sh"), name], { env });
       }
-      await show(`✅ Container \`slack-tag-${name}\` started on port ${port}`);
+      await show(`✅ Folder prepared and container \`slack-tag-${name}\` started on port ${port}`);
 
       step = "Waiting for OpenCode";
       const client = connect(channel.opencodeUrl, password);
