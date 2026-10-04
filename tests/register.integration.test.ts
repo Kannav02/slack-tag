@@ -3,6 +3,7 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { once } from "node:events";
 import {
   chmod,
+  chown,
   mkdir,
   mkdtemp,
   readFile,
@@ -61,7 +62,7 @@ function portOf(server: Server) {
   return address.port;
 }
 
-// The real bridge and prepare-project.sh run; Slack, OpenCode and the docker CLI are stand-ins.
+// The real bridge, start-project.sh and prepare-project.sh run; Slack, OpenCode and the docker CLI are stand-ins.
 await test("registering a project folder from Slack", { timeout: 30_000 }, async (t) => {
   const work = await realpath(await mkdtemp(join(tmpdir(), "slack-tag-register-")));
   const code = join(work, "code");
@@ -257,6 +258,11 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   for (const dir of ["app-one", "taken", ".hidden"])
     await mkdir(join(code, dir), { recursive: true });
   await writeFile(join(code, "notes.txt"), "not a folder");
+  // As root, deploy/start-project.sh prepares the folder as uid 1000, which must be able to reach and own it.
+  if (process.getuid?.() === 0) {
+    await chmod(work, 0o755);
+    await chown(join(code, "app-one"), 1000, 1000);
+  }
   await symlink(work, join(code, "link"));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   base = `http://127.0.0.1:${portOf(server)}`;
@@ -318,10 +324,7 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   await writeFile(join(work, "fail"), "");
   choose("app-one");
   await until(() => status().includes("❌"));
-  assert.match(
-    status(),
-    /✅ Folder prepared\n❌ Starting the container failed: port is already allocated/,
-  );
+  assert.match(status(), /❌ Starting the project failed: port is already allocated/);
   const firstEnv = await readFile(envFile, "utf8");
   await rm(join(work, "fail"));
   choose("app-one");
@@ -372,12 +375,12 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   mention({ ts: "100.50", text: "<@UBOT> hello" });
   await until(() => prompts.length === 1);
   assert.equal(sessions[0]?.location.directory, "/project");
-  assert.equal(prompts[0]?.text, "hello");
+  assert.equal(prompts[0]?.text, "<@UOWNER>: hello");
   await stop();
   await start();
   mention({ ts: "100.60", text: "<@UBOT> after restart" });
   await until(() => prompts.length === 2);
-  assert.equal(prompts[1]?.text, "after restart");
+  assert.equal(prompts[1]?.text, "<@UOWNER>: after restart");
   assert.match(logs, /channel CNEW \(app-one\) ready/);
   assert.deepEqual(unexpected, []);
 });

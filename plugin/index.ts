@@ -4,6 +4,11 @@ import { safeDecide, stripSecrets } from "./src/policy.ts";
 import { definition, status } from "./src/rpc.ts";
 
 const AGENT_SHELL = "/usr/local/bin/agent-shell";
+const MULTIPLAYER =
+  "You are in a multiplayer session in a shared Slack thread. Several people may send messages, " +
+  "and each message starts with its sender's Slack mention, such as <@U123>:. Keep track of who " +
+  "asked for what, address people by their mention when it helps, and do not assume that one " +
+  "person agrees with another's request.";
 
 export default Plugin.define({
   id: "slack-tag",
@@ -21,6 +26,10 @@ export default Plugin.define({
     await ctx.shell.hook("create.before", (input) => {
       stripSecrets(input.env);
       if (agentShell) input.shell = AGENT_SHELL;
+    });
+    // Slack threads are shared: tell the model several people may write, each message tagged by the bridge.
+    await ctx.session.hook("context", (input) => {
+      input.system.push({ type: "text", text: MULTIPLAYER });
     });
   },
 });

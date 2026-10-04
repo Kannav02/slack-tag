@@ -42,7 +42,16 @@ install -d -m 2750 -o slack-tag -g 1000 /var/lib/slack-tag/inbox
    systemctl daemon-reload
    ```
 
-   `SLACK_TAG_PROJECTS_ROOT` must match `onboarding.projectsRoot`. `/opt/slack-tag` must stay root-owned and not writable by `slack-tag`, because root runs `deploy/start-project.sh` from it. Check the rule with `sudo -u slack-tag systemctl start --no-ask-password slack-tag-project@nonexistent.service`: it should fail as a job (`journalctl -u slack-tag-project@nonexistent` shows "no env file"), not with "Access denied". Any other unit, or `stop`, must still say "Access denied".
+   `SLACK_TAG_PROJECTS_ROOT` must match `onboarding.projectsRoot`. Keep it outside `/home`: the bridge unit hides `/home` (`ProtectHome`) and makes every other folder read-only, so the bridge only lists the folder names. The bridge does not write to projects; `deploy/start-project.sh` prepares each folder with `deploy/prepare-project.sh` as uid 1000 (the container user, `setpriv` from util-linux), never as root, and closes it to other users (`chmod o-rwx`). The folder must therefore be owned by uid 1000 and listable by `slack-tag`. To move existing projects (Git remotes and credentials stay valid, because they live in `.git/config` and your home folder):
+
+   ```bash
+   install -d -m 0755 -o 1000 -g 1000 /srv/slack-tag/projects
+   mv /home/devuser/projects/<project> /srv/slack-tag/projects/
+   chmod o-rwx /srv/slack-tag/projects/*
+   ln -s /srv/slack-tag/projects /home/devuser/projects   # optional: keep the old path for your shell
+   ```
+
+   Then update that channel's `projectDir` in `config.json` (or `deploy/.env` for a hand-made channel) and recreate its container. Clone new projects into `/srv/slack-tag/projects` as uid 1000 before you register them. `/opt/slack-tag` must stay root-owned and not writable by `slack-tag`, because root runs `deploy/start-project.sh` from it. Check the rule with `sudo -u slack-tag systemctl start --no-ask-password slack-tag-project@nonexistent.service`: it should fail as a job (`journalctl -u slack-tag-project@nonexistent` shows "no env file"), not with "Access denied". Any other unit, or `stop`, must still say "Access denied".
 
    For each channel connected by hand, run `deploy/prepare-project.sh <project folder>`, create its upload inbox `/var/lib/slack-tag/inbox/<channel name>` owned by the bridge's user (`install -d -m 0755 -o <bridge user> …`) before starting its container, create its env file as in step 2, give it a service in `deploy/compose.yaml` (copy `beta`, with its own env file, network and `/inbox` mount, and add that network to `key-proxy`), and add it to `/var/lib/slack-tag/config.json` in the shape of `config/example.json`, with `serverDir` set to `/project` and `opencodeUrl` set to the service's host port.
 5. Write `deploy/.env` with the Compose variables, for example `ALPHA_PROJECT=/srv/slack-tag/projects/alpha` and `SLACK_TAG_RUNTIME=runsc`. It holds paths only, no secrets. Then start the containers. `restart: unless-stopped` brings them back after a reboot.
