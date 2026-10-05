@@ -16,6 +16,8 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
 | DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
+| DUR-1 | Persist the project queue and drop duplicate messages | High | Proposed |
+| DUR-2 | Reattach to running turns after a bridge restart | High | Proposed |
 
 ## Current behavior
 
@@ -110,6 +112,30 @@ Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that
 - **CMD-1 Commands:** a mention whose text starts with `/init`, `/review`, `/model`, `/stop` or `/compact` is a command; any other leading `/` stays a prompt. `/init` and `/review` run OpenCode server commands in the thread's session. `/model` lists enabled models from the channel model's provider and switches only the thread's session; attachments are checked against the session's current model. `/stop` interrupts and `/compact` requests compaction. Verified with integration tests and against real OpenCode 2.0.15 with a scripted model; not yet checked in a development Slack workspace (Slack may reject thread replies starting with `/`, so commands are written after the mention).
 - **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, key proxy, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
 - **DEMO-1 Screenshot demos:** let the agent show that a feature works by driving a headless browser and posting screenshots or short recordings to the Slack thread, and later to the PR. See the proposal below.
+
+## Durability items
+
+Ideas taken from Earendil's Pi Durable (2026-10-01): checkpoint progress to storage, and give every user input an id so a retry runs it once. These are proposals; nothing below is implemented.
+
+### DUR-1: Persist the project queue and drop duplicate messages
+
+**Background:** `bridge/src/turn.ts` holds the per-project queue in memory. `SPEC.md` states that messages still waiting when the bridge restarts are dropped.
+
+**Problem:** a restart or crash silently loses queued prompts. Nothing records which Slack messages were already accepted, so a redelivered Slack event could run the same prompt twice (whether Socket Mode redelivers in practice is not verified).
+
+**Scope:** store each accepted message in SQLite keyed by channel and Slack message `ts`, with state `queued`, `running`, `done` or `failed`. Ignore a message whose `ts` is already stored. On startup, reload `queued` entries in arrival order and update their "Queued" replies. Decide what a `running` entry means after restart together with DUR-2. Update `SPEC.md`.
+
+**Acceptance:** integration tests through the bridge entrypoint with simulated Slack and a disposable SQLite: queued messages survive a bridge restart and run in order; the same event delivered twice produces one prompt and one reply.
+
+### DUR-2: Reattach to running turns after a bridge restart
+
+**Background:** OpenCode runs in the project container, so a bridge restart does not stop the agent. `recover()` in `turn.ts` still marks every `streaming` reply as "The bridge restarted during the run" and stops following it.
+
+**Problem:** the owner loses the answer from a run that actually finished, and the project queue may start the next prompt while the previous one is still running. Rebuilding a stream after reconnecting is untested (`opencode-interface.md`).
+
+**Scope:** on startup, for each `streaming` reply check `session.active()`. If the session is still running, read its messages, rewrite the Slack reply from them, keep the project's queue slot, and continue from live events. If it finished, write the final answer and mark the reply `done`. Only a run OpenCode no longer has gets the restart notice. Apply the same read-then-follow step after the event stream reconnects.
+
+**Acceptance:** integration tests with a simulated OpenCode: a run still going during a bridge restart ends with the full answer in the original reply; a run that finished while the bridge was down shows its final answer. Check once against real OpenCode 2.0.15 and report which checks were real.
 
 ## DEMO-1 Screenshot demos: proposal, not a final design
 
