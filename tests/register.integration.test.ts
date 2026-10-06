@@ -23,6 +23,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
+import { fakeGitHub } from "./github.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
@@ -80,9 +81,9 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   let sequence = 0;
   let base = "";
 
-  const projectPassword = async () =>
-    (await readFile(envFile, "utf8")).match(/SLACK_TAG_PASSWORD=(\w+)/)?.[1];
-  async function respond(req: IncomingMessage, res: ServerResponse, raw: string) {
+  const projectPassword = async (file = envFile) =>
+    (await readFile(file, "utf8")).match(/SLACK_TAG_PASSWORD=(\w+)/)?.[1];
+  async function respond(req: IncomingMessage, res: ServerResponse, raw: string, file?: string) {
     const args: unknown = req.headers["content-type"]?.includes("json")
       ? JSON.parse(raw || "{}")
       : Object.fromEntries(new URLSearchParams(raw));
@@ -93,7 +94,7 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
     };
     if (path.startsWith("/api/") && !path.includes(".")) {
       // The registered project's OpenCode server accepts only that project's password.
-      const password = await projectPassword().catch(() => undefined);
+      const password = await projectPassword(file).catch(() => undefined);
       if (
         !password ||
         req.headers.authorization !==
@@ -128,17 +129,19 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
     messages.push({ method: path.split("/").at(-1), ...call, ts });
     json({ ok: true, ts, channel: call.channel });
   }
-  const handler = (req: IncomingMessage, res: ServerResponse) => {
+  // Each project's OpenCode server checks the password in its own env file.
+  const handlerFor = (file?: string) => (req: IncomingMessage, res: ServerResponse) => {
     text(req)
-      .then((raw) => respond(req, res, raw))
+      .then((raw) => respond(req, res, raw, file))
       .catch((error: unknown) => {
         unexpected.push(error instanceof Error ? error.message : "request failed");
         res.destroy();
       });
   };
   // Slack is served from the start; the project's OpenCode only once `docker compose up` succeeds.
-  const server = createServer(handler);
-  const opencode = createServer(handler);
+  const server = createServer(handlerFor());
+  const opencode = createServer(handlerFor());
+  const cloned = createServer(handlerFor(join(state, "projects", "billclear.env")));
   const wss = new WebSocketServer({ server, path: "/socket" });
   wss.on("connection", (ws) => {
     socket = ws;
@@ -159,7 +162,7 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
     for (const ws of wss.clients) ws.terminate();
     for (const res of streams) res.end();
     wss.close();
-    for (const s of [server, opencode]) {
+    for (const s of [server, opencode, cloned]) {
       s.closeAllConnections();
       if (s.listening) await new Promise<void>((resolve) => s.close(() => resolve()));
     }
@@ -191,6 +194,8 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
           SLACK_BOT_TOKEN: "xoxb-test",
           SLACK_APP_TOKEN: "xapp-test",
           TAKEN_SERVER_PASSWORD: "taken-secret",
+          SLACK_TAG_GIT_KEY: github.key,
+          SLACK_TAG_GIT_KNOWN_HOSTS: github.known,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -261,8 +266,9 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   // As root, deploy/start-project.sh prepares the folder as uid 1000, which must be able to reach and own it.
   if (process.getuid?.() === 0) {
     await chmod(work, 0o755);
-    await chown(join(code, "app-one"), 1000, 1000);
+    for (const dir of [code, join(code, "app-one")]) await chown(dir, 1000, 1000);
   }
+  const github = await fakeGitHub(work, join(work, "bin"), "Kannav02/BillClear.git");
   await symlink(work, join(code, "link"));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   base = `http://127.0.0.1:${portOf(server)}`;
@@ -382,5 +388,49 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   await until(() => prompts.length === 2);
   assert.equal(prompts[1]?.text, "<@UOWNER>: after restart");
   assert.match(logs, /channel CNEW \(app-one\) ready/);
+
+  // `register <GitHub SSH URL>` clones the repository into the projects folder, then starts it the same way.
+  // Slack sends the URL with git@github.com turned into a mailto link.
+  const latest = (channel: string) =>
+    messages.filter((m) => m.channel === channel).at(-1)?.text ?? "";
+  const register = (channel: string, ts: string, url: string) =>
+    mention({ ts, channel, text: `<@UBOT> register ${url}` });
+  register("CBAD", "100.65", "<https://github.com/Kannav02/BillClear>");
+  await until(() => latest("CBAD").includes("not a GitHub SSH URL"));
+  // An existing folder is never overwritten by a clone.
+  register("CBAD", "100.66", "git@github.com:Kannav02/app-one.git");
+  await until(() => latest("CBAD").includes("already exists"));
+
+  const repoEnv = join(state, "projects", "billclear.env");
+  register("CREPO", "100.70", "<mailto:git@github.com|git@github.com>:Kannav02/BillClear.git");
+  await until(async () =>
+    (await readFile(repoEnv, "utf8").catch(() => "")).includes("SLACK_TAG_REPO"),
+  );
+  const repoPort = Number((await readFile(repoEnv, "utf8")).match(/SLACK_TAG_PORT=(\d+)/)?.[1]);
+  await new Promise<void>((resolve) => cloned.listen(repoPort, "127.0.0.1", () => resolve()));
+  await until(() => latest("CREPO").includes("Connected"));
+  assert.match(
+    latest("CREPO"),
+    /^Registering `BillClear` from `git@github.com:Kannav02\/BillClear.git`…\n✅ Cloned, folder prepared/,
+  );
+  assert.equal(await readFile(join(code, "BillClear", "README.md"), "utf8"), "# BillClear\n");
+  assert.match(
+    await readFile(repoEnv, "utf8"),
+    /^SLACK_TAG_REPO=git@github.com:Kannav02\/BillClear.git$/m,
+  );
+  const withRepo = savedConfig.parse(
+    JSON.parse(await readFile(join(state, "config.json"), "utf8")),
+  );
+  assert.deepEqual(withRepo.channels.CREPO, {
+    name: "billclear",
+    projectDir: join(code, "BillClear"),
+    serverDir: "/project",
+    opencodeUrl: `http://127.0.0.1:${repoPort}`,
+    passwordFile: repoEnv,
+    model: "test/test",
+  });
+  mention({ ts: "100.80", channel: "CREPO", text: "<@UBOT> hello repo" });
+  await until(() => prompts.length === 3);
+  assert.equal(prompts[2]?.text, "<@UOWNER>: hello repo");
   assert.deepEqual(unexpected, []);
 });

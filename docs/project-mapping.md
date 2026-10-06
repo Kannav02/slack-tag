@@ -75,4 +75,10 @@ Each registered project gets its own server password and its own copy of the key
 
 If a step fails, the message names it; choosing the folder again (or posting `register` again) resumes and reuses the same port, network and password; an env file from before networks were numbered gets one on the next attempt. To change Docker's runtime or image for registered projects, set `SLACK_TAG_RUNTIME` (`runc` only where gVisor cannot be installed) or `SLACK_TAG_IMAGE` (and `PROXY_ENV_FILE` if not the default) in `bridge.env`. On the VPS (`"start": "systemd"`) these come from `/etc/slack-tag/registration.env` instead, and the bridge only runs `systemctl start slack-tag-project@<name>.service` (see [deployment](deploy.md)). Either way `deploy/start-project.sh` checks the project's env file (name, folder directly inside `projectsRoot`, port, network, password, inbox) and passes `docker compose` only those values and the operator's settings, never the Slack tokens, other channels' passwords or anything else from that file.
 
-Not covered: cloning repositories, unregistering a channel, or moving a channel to another folder.
+### Registering from a GitHub repository
+
+Post `@OpenCode register git@github.com:<owner>/<repo>.git` instead to clone the repository into `projectsRoot/<repo>` and register it the same way. Only that SSH form is accepted (Slack's mailto link around `git@github.com` is removed); an existing folder is never overwritten, so use plain `register` for folders already there. The bridge writes the URL to the project's env file as `SLACK_TAG_REPO`. On the first start, `deploy/start-project.sh` checks it again and, as uid 1000, clones it into a hidden `.clone-<name>` folder and then moves it into place. It uses only the key and host keys named by `SLACK_TAG_GIT_KEY` and `SLACK_TAG_GIT_KNOWN_HOSTS` (in `registration.env`, or the bridge's environment in development). Without them, cloning fails with "cloning is not configured". Retrying after a failed later step reuses the clone.
+
+The key never enters the container, and the bridge cannot read it. Any repository the key can read can be cloned by the owner. The agent commits locally; `git push` stays blocked, so push from the VPS as the key's owner (`git -C /srv/slack-tag/projects/<repo> push`).
+
+Not covered: unregistering a channel, or moving a channel to another folder.

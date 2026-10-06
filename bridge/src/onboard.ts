@@ -19,6 +19,9 @@ import type { Runtime, SlackApi } from "./turn.ts";
 const exec = promisify(execFile);
 const deploy = fileURLToPath(new URL("../../deploy/", import.meta.url));
 const FOLDER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// The only repository form registration clones; deploy/start-project.sh checks it again before cloning.
+const REPO =
+  /^git@github\.com:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git$/;
 const READY_MS = 120_000;
 // Ports above 1024 that fetch refuses to connect to ("bad port"), so the bridge could never reach a server there.
 const FETCH_BLOCKED = new Set([
@@ -27,10 +30,13 @@ const FETCH_BLOCKED = new Set([
 ]);
 // The start script gets only what it needs from the bridge's environment: never the Slack tokens or other channels' passwords.
 const PASSED =
-  /^(PATH|HOME|USER|LANG|LC_\w+|TMPDIR|XDG_RUNTIME_DIR|DOCKER_\w+|SLACK_TAG_(RUNTIME|IMAGE)|PROXY_ENV_FILE)$/;
+  /^(PATH|HOME|USER|LANG|LC_\w+|TMPDIR|XDG_RUNTIME_DIR|DOCKER_\w+|SLACK_TAG_(RUNTIME|IMAGE|GIT_KEY|GIT_KNOWN_HOSTS)|PROXY_ENV_FILE)$/;
 
 const section = (text: string) => [{ type: "section", text: { type: "mrkdwn", text } }];
 const portOf = (url: string) => Number(new URL(url).port);
+// Slack sends git@github.com as a mailto link (<mailto:git@github.com|git@github.com>) and other links in <>.
+const unlink = (text: string) =>
+  text.replace(/<[^|>]*\|([^>]*)>/g, "$1").replace(/<([^>]*)>/g, "$1");
 const messageOf = (error: unknown) => {
   const e = error as { stderr?: string; message?: string };
   return (e.stderr?.trim() || e.message || "unknown error").slice(-500);
@@ -70,7 +76,8 @@ export function createOnboarding(
       .sort();
   }
 
-  async function offer(channelId: string, threadTs: string) {
+  // `register` offers the existing folders; `register <GitHub SSH URL>` clones the repository instead.
+  async function offer(channelId: string, threadTs: string, request: string) {
     const onboarding = config.onboarding;
     if (!onboarding)
       return void (await slack.post(
@@ -78,6 +85,8 @@ export function createOnboarding(
         threadTs,
         "This channel is not mapped to a project, and project registration is not configured.",
       ));
+    const url = unlink(request).trim().split(/\s+/).slice(1).join(" ");
+    if (url) return clone(channelId, threadTs, url);
     const names = await folders(await realpath(onboarding.projectsRoot));
     if (!names.length)
       return void (await slack.post(
@@ -100,8 +109,24 @@ export function createOnboarding(
     ]);
   }
 
+  async function clone(channelId: string, threadTs: string, url: string) {
+    const folder = REPO.exec(url)?.[1];
+    if (!folder)
+      return void (await slack.post(
+        channelId,
+        threadTs,
+        `\`${url}\` is not a GitHub SSH URL. Use \`git@github.com:<owner>/<repo>.git\`.`,
+      ));
+    const messageTs = await slack.post(channelId, threadTs, `Registering \`${folder}\`…`);
+    chain = chain
+      .then(() => register(channelId, messageTs, folder, url))
+      .catch((error: unknown) => console.error("register failed:", messageOf(error)));
+    return chain;
+  }
+
   // Each step is safe to repeat, so choosing the folder again after a failure resumes the setup.
-  async function register(channelId: string, messageTs: string, folder: string) {
+  // With a repository URL, the start script clones it into the folder, which must not exist yet.
+  async function register(channelId: string, messageTs: string, folder: string, repo?: string) {
     const lines: string[] = [];
     const show = (line: string) => {
       lines.push(line);
@@ -112,17 +137,25 @@ export function createOnboarding(
     const root = await realpath(config.onboarding!.projectsRoot);
     const projectDir = join(root, folder);
     const entry = FOLDER.test(folder) ? await lstat(projectDir).catch(() => undefined) : undefined;
-    if (!entry?.isDirectory())
+    const name = folder.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    // A folder cloned by an earlier attempt resumes; any other existing folder is never overwritten.
+    const cloned =
+      repo &&
+      (await readFile(join(stateDir, `${name}.env`), "utf8").then(parseEnv, () => undefined))
+        ?.SLACK_TAG_REPO === repo;
+    if (repo && entry && !cloned)
+      return show(
+        `\`${folder}\` already exists in \`${config.onboarding!.projectsRoot}\`. Mention me with \`register\` to choose it instead.`,
+      );
+    if (!repo && !entry?.isDirectory())
       return show(`\`${folder}\` is not a folder in \`${config.onboarding!.projectsRoot}\`.`);
     if (used().has(projectDir))
       return show(`\`${folder}\` is already connected to another channel.`);
-
-    const name = folder.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (name.length > 40)
       return show(`\`${folder}\` is too long for a project name (40 characters at most).`);
     let step = "Starting the project";
     try {
-      await show(`Registering \`${folder}\`…`);
+      await show(`Registering \`${folder}\`${repo ? ` from \`${repo}\`` : ""}…`);
       const stored: StoredChannel = {
         name,
         projectDir,
@@ -131,7 +164,7 @@ export function createOnboarding(
         passwordFile: join(stateDir, `${name}.env`),
         model: config.onboarding!.model,
       };
-      const { port, password } = await envFor(name, projectDir);
+      const { port, password } = await envFor(name, projectDir, repo);
       stored.opencodeUrl = `http://127.0.0.1:${port}`;
       const channel = prepareChannel(configPath, channelId, stored);
       // Create the inbox before Docker would create the mount point as root.
@@ -150,7 +183,9 @@ export function createOnboarding(
         };
         await exec("sh", [join(deploy, "start-project.sh"), name], { env });
       }
-      await show(`✅ Folder prepared and container \`slack-tag-${name}\` started on port ${port}`);
+      await show(
+        `✅ ${repo ? "Cloned, folder" : "Folder"} prepared and container \`slack-tag-${name}\` started on port ${port}`,
+      );
 
       step = "Waiting for OpenCode";
       const client = connect(channel.opencodeUrl, password);
@@ -175,7 +210,7 @@ export function createOnboarding(
   }
 
   // Reuse the port, network and password from an earlier attempt, so a retry starts the same container.
-  async function envFor(name: string, projectDir: string) {
+  async function envFor(name: string, projectDir: string, repo?: string) {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     const file = join(stateDir, `${name}.env`);
     const others: Record<string, string>[] = [];
@@ -200,7 +235,7 @@ export function createOnboarding(
     const password = randomBytes(24).toString("hex");
     await writeFile(
       file,
-      `SLACK_TAG_PROJECT=${projectDir}\nSLACK_TAG_PORT=${port}\nSLACK_TAG_PASSWORD=${password}\nSLACK_TAG_NET=${netFor(others)}\n`,
+      `SLACK_TAG_PROJECT=${projectDir}\nSLACK_TAG_PORT=${port}\nSLACK_TAG_PASSWORD=${password}\nSLACK_TAG_NET=${netFor(others)}\n${repo ? `SLACK_TAG_REPO=${repo}\n` : ""}`,
       { mode: 0o600 },
     );
     return { port, password };
