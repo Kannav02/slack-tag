@@ -15,6 +15,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-7 | Document architecture and trust boundaries | Medium | Done; keep updated |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
+| ONB-2 | Register a project by cloning a GitHub SSH URL | Medium | Implemented; VPS verification pending |
 | DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
 
 ## Current behavior
@@ -108,7 +109,8 @@ Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that
 ## Feature items
 
 - **CMD-1 Commands:** a mention whose text starts with `/init`, `/review`, `/model`, `/stop` or `/compact` is a command; any other leading `/` stays a prompt. `/init` and `/review` run OpenCode server commands in the thread's session. `/model` lists enabled models from the channel model's provider and switches only the thread's session; attachments are checked against the session's current model. `/stop` interrupts and `/compact` requests compaction. Verified with integration tests and against real OpenCode 2.0.15 with a scripted model; not yet checked in a development Slack workspace (Slack may reject thread replies starting with `/`, so commands are written after the mention).
-- **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, key proxy, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
+- **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, key proxy, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Unregistering is not covered.
+- **ONB-2 Clone on register:** `@OpenCode register git@github.com:<owner>/<repo>.git` clones the repository into `projectsRoot/<repo>` with the operator's SSH key, then registers it like ONB-1. The clone runs in `deploy/start-project.sh` as uid 1000; the bridge and the agent never see the key, and `git push` stays blocked. Verified with integration tests (real `git`, stand-in SSH); not yet against real GitHub on the VPS. Pushing from Slack is a possible follow-up.
 - **DEMO-1 Screenshot demos:** let the agent show that a feature works by driving a headless browser and posting screenshots or short recordings to the Slack thread, and later to the PR. See the proposal below.
 
 ## DEMO-1 Screenshot demos: proposal, not a final design

@@ -42,6 +42,12 @@ install -d -m 2750 -o slack-tag -g 1000 /var/lib/slack-tag/inbox
    systemctl daemon-reload
    ```
 
+   To register by cloning a GitHub SSH URL (`register git@github.com:<owner>/<repo>.git`), also add the key the clone uses. It must be readable by uid 1000 (`devuser`'s own key qualifies). Pin GitHub's host keys first (`ssh -T git@github.com` as `devuser`, then compare with GitHub's published fingerprints):
+
+   ```bash
+   printf 'SLACK_TAG_GIT_KEY=/home/devuser/.ssh/id_ed25519\nSLACK_TAG_GIT_KNOWN_HOSTS=/home/devuser/.ssh/known_hosts\n' >> /etc/slack-tag/registration.env
+   ```
+
    `SLACK_TAG_PROJECTS_ROOT` must match `onboarding.projectsRoot`. Keep it outside `/home`: the bridge unit hides `/home` (`ProtectHome`) and makes every other folder read-only, so the bridge only lists the folder names. The bridge does not write to projects; `deploy/start-project.sh` prepares each folder with `deploy/prepare-project.sh` as uid 1000 (the container user, `setpriv` from util-linux), never as root, and closes it to other users (`chmod o-rwx`). The folder must therefore be owned by uid 1000 and listable by `slack-tag`. To move existing projects (Git remotes and credentials stay valid, because they live in `.git/config` and your home folder):
 
    ```bash
