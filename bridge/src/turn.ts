@@ -120,7 +120,7 @@ export function createRouter(
   db: Db,
   slack: SlackApi,
   channels: Map<string, Runtime>,
-  offer: (channelId: string, threadTs: string) => Promise<void>,
+  offer: (channelId: string, threadTs: string, text: string) => Promise<void>,
 ) {
   const runs = new Map<string, Run>();
   const queues = new Map<string, Queue>();
@@ -339,7 +339,8 @@ export function createRouter(
           threadTs,
           "This channel is not mapped to a project. Only the owner can register one.",
         );
-      if (m.text.trim().toLowerCase() === "register") return offer(m.channelId, threadTs);
+      if (/^register(\s|$)/i.test(m.text.trim()))
+        return offer(m.channelId, threadTs, m.text.trim());
       return say(
         "This channel is not mapped to a project. Mention me with `register` to connect a project folder.",
       );
