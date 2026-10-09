@@ -4,9 +4,16 @@ import { definition } from "../../plugin/src/rpc.ts";
 
 const handledEvents = [
   "permission.asked",
+  "permission.replied",
   "session.retry.scheduled",
   "session.inbox.delivered",
+  "session.text.started",
   "session.text.delta",
+  "session.tool.input.started",
+  "session.tool.called",
+  "session.tool.success",
+  "session.tool.failed",
+  "session.execution.started",
   "session.execution.succeeded",
   "session.execution.failed",
   "session.execution.interrupted",
