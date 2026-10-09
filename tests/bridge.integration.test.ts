@@ -77,6 +77,8 @@ async function harness(t: TestContext) {
     model("test", "text-only", ["text"]),
     model("other", "x", ["text"]),
   ];
+  // OpenCode answers its first model lists with an empty catalog while it is still loading.
+  const catalog = { emptyLists: 0 };
   const unexpected: string[] = [];
   const replies: Record<string, unknown>[] = [];
   const fetched: { path: string; authorization: string | undefined }[] = [];
@@ -123,7 +125,13 @@ async function harness(t: TestContext) {
     if (path === "/files/note.txt") return res.end("uploaded note");
     if (path === "/api/rpc/slack-tag/status")
       return json({ output: { pluginVersion: "test", policyVersion: 3 } });
-    if (path === "/api/model") return json({ data: models });
+    if (path === "/api/model") {
+      if (catalog.emptyLists > 0) {
+        catalog.emptyLists--;
+        return json({ data: [] });
+      }
+      return json({ data: models });
+    }
     if (path === "/api/session" && req.method === "POST") {
       const id = `ses_test${sessions.length + 1}`;
       sessions.push({ id, ...sessionCall.parse(args) });
@@ -372,6 +380,7 @@ async function harness(t: TestContext) {
     calls,
     replies,
     fetched,
+    catalog,
     unexpected,
     logs: () => logs,
     until,
@@ -729,6 +738,35 @@ await test(
     h.emit("session.execution.succeeded", h.prompts[0]?.sessionID ?? "");
     await h.until(() => h.calls.filter((c) => c.type === "command").length === 2);
     assert.equal(h.calls.at(-1)?.text, "again");
+    assert.deepEqual(h.unexpected, []);
+  },
+);
+
+await test(
+  "/model as a thread's first message waits for OpenCode's model catalog",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t);
+    const reply = async (thread: string, pattern: RegExp) => {
+      const matches = (m: Message) => m.thread_ts === thread && pattern.test(m.text ?? "");
+      await h.until(() => h.messages.some(matches));
+      return h.messages.findLast(matches)?.text ?? "";
+    };
+
+    h.catalog.emptyLists = 2;
+    h.send({ ts: "400.1", text: "<@UBOT> /model" });
+    const list = await reply("400.1", /Available models/);
+    assert.match(list, /`test\/test` \(images\) \(current\)/);
+    assert.match(list, /`test\/text-only`/);
+    assert.equal(h.catalog.emptyLists, 0);
+
+    // A catalog that never loads gets a retry hint instead of an empty list or a false refusal.
+    h.catalog.emptyLists = 1000;
+    h.send({ ts: "400.2", text: "<@UBOT> /model" });
+    await reply("400.2", /model list is still loading/);
+    h.send({ ts: "400.3", text: "<@UBOT> /model text-only" });
+    await reply("400.3", /model list is still loading/);
+    assert.equal(h.sessions.length, 0);
     assert.deepEqual(h.unexpected, []);
   },
 );

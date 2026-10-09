@@ -15,6 +15,7 @@ export type Command = { name: string; args: string };
 export const SERVER_COMMANDS = new Set(["init", "review"]);
 const NAMES = new Set([...SERVER_COMMANDS, "model", "stop", "compact"]);
 const NO_SESSION = "No session in this thread yet. Mention OpenCode with a request first.";
+const LOADING = "OpenCode's model list is still loading. Try `/model` again in a moment.";
 
 const escape = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -53,6 +54,7 @@ async function model(
 ) {
   const current = sessionId ? await sessionModel(client, sessionId, channel.model) : channel.model;
   const options = await modelsOf(client, channel.model);
+  if (!options.length) return `*Current model:* \`${current}\`\n${LOADING}`;
   const list = [
     `*Current model:* \`${current}\``,
     "*Available models:*",
