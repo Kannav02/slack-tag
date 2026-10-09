@@ -1,0 +1,59 @@
+{"type":"session.created","data":{"sessionID":"SESSION","slug":"playful-sailor","version":"2.0.15","projectID":"5a06f44c7fbba6de94ab7b945bfbb7ae0904dcd5","location":{"directory":"/project"},"subpath":"","title":"progress"}}
+{"type":"session.inbox.enqueued","data":{"inboxID":"msg_1215386dd001MSsDVd7UMg6wdb","sessionID":"SESSION","item":{"type":"user","payload":{"text":"Look around this project."},"delivery":"steer"}}}
+{"type":"session.execution.started","data":{"sessionID":"SESSION"}}
+{"type":"session.inbox.delivered","data":{"sessionID":"SESSION","inboxID":"msg_1215386dd001MSsDVd7UMg6wdb"}}
+{"type":"session.step.started","data":{"sessionID":"SESSION","agent":"build","model":{"id":"mock","providerID":"mock"},"assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","snapshot":"49092bc611d561f69a2ab5dd83f3c327c74700f6","started":1791560484699}}
+{"type":"session.reasoning.started","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"state":{"reasoningField":"reasoning_content"}}}
+{"type":"session.reasoning.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"delta":"The user wants "}}
+{"type":"session.reasoning.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"delta":"a look around. "}}
+{"type":"session.reasoning.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"delta":"Start with the "}}
+{"type":"session.text.started","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0}}
+{"type":"session.reasoning.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"delta":"readme."}}
+{"type":"session.text.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"delta":"Let me check "}}
+{"type":"session.text.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"delta":"the readme first."}}
+{"type":"session.tool.input.started","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","id":"call_0_mock-1791560484709","name":"read"}}
+{"type":"session.reasoning.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"text":"The user wants a look around. Start with the readme.","state":{"reasoningField":"reasoning_content"}}}
+{"type":"session.tool.input.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","id":"call_0_mock-1791560484709","text":"{\"path\":\"/project/README.md\"}"}}
+{"type":"session.tool.called","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","id":"call_0_mock-1791560484709","input":{"path":"/project/README.md"},"executed":false}}
+{"type":"session.text.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","ordinal":0,"text":"Let me check the readme first."}}
+{"type":"session.step.streamed","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr"}}
+{"type":"session.tool.success","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","id":"call_0_mock-1791560484709","content":[{"type":"text","text":"Read file /project/README.md, lines 1-1\n1: spike"}],"metadata":{"truncated":false},"executed":false}}
+{"type":"session.step.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538728001aCX5LqLRDAdZDr","finish":"tool-calls","rawFinish":"tool_calls","cost":0,"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"snapshot":"49092bc611d561f69a2ab5dd83f3c327c74700f6","files":[]}}
+{"type":"session.usage.updated","data":{"sessionID":"SESSION","cost":0,"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}}}}
+{"type":"session.step.started","data":{"sessionID":"SESSION","agent":"build","model":{"id":"mock","providerID":"mock"},"assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","snapshot":"49092bc611d561f69a2ab5dd83f3c327c74700f6","started":1791560485497}}
+{"type":"session.text.started","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","ordinal":0}}
+{"type":"session.text.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","ordinal":0,"delta":"Two more checks."}}
+{"type":"session.tool.input.started","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","id":"call_0_mock-1791560485504","name":"grep"}}
+{"type":"session.tool.input.started","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","id":"call_1_mock-1791560485504","name":"read"}}
+{"type":"session.tool.input.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","id":"call_0_mock-1791560485504","text":"{\"pattern\":\"spike\",\"path\":\"/project\"}"}}
+{"type":"session.tool.called","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","id":"call_0_mock-1791560485504","input":{"pattern":"spike","path":"/project"},"executed":false}}
+{"type":"session.tool.input.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","id":"call_1_mock-1791560485504","text":"{\"path\":\"/project/missing.md\"}"}}
+{"type":"session.tool.called","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","id":"call_1_mock-1791560485504","input":{"path":"/project/missing.md"},"executed":false}}
+{"type":"session.text.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","ordinal":0,"text":"Two more checks."}}
+{"type":"session.step.streamed","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv"}}
+{"type":"session.tool.failed","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","id":"call_1_mock-1791560485504","error":{"type":"tool.execution","message":"File not found: /project/missing.md"},"executed":false}}
+{"type":"session.tool.success","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","id":"call_0_mock-1791560485504","content":[{"type":"text","text":"Found 1 matches\n/project/README.md:\n  Line 1: spike\n"}],"metadata":{"matches":1,"truncated":false},"executed":false}}
+{"type":"session.step.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538a49001vkiZQromuMYXhv","finish":"tool-calls","rawFinish":"tool_calls","cost":0,"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"snapshot":"49092bc611d561f69a2ab5dd83f3c327c74700f6","files":[]}}
+{"type":"session.usage.updated","data":{"sessionID":"SESSION","cost":0,"tokens":{"input":2,"output":2,"reasoning":0,"cache":{"read":0,"write":0}}}}
+{"type":"session.step.started","data":{"sessionID":"SESSION","agent":"build","model":{"id":"mock","providerID":"mock"},"assistantMessageID":"msg_121538b57001Kv7ZEUkNAMigQ0","snapshot":"49092bc611d561f69a2ab5dd83f3c327c74700f6","started":1791560485761}}
+{"type":"session.tool.input.started","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538b57001Kv7ZEUkNAMigQ0","id":"call_0_mock-1791560485767","name":"shell"}}
+{"type":"session.tool.input.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538b57001Kv7ZEUkNAMigQ0","id":"call_0_mock-1791560485767","text":"{\"command\":\"ls\"}"}}
+{"type":"session.tool.called","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538b57001Kv7ZEUkNAMigQ0","id":"call_0_mock-1791560485767","input":{"command":"ls"},"executed":false}}
+{"type":"session.step.streamed","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538b57001Kv7ZEUkNAMigQ0"}}
+{"type":"permission.asked","data":{"id":"per_121538c11001Z27ixSxPPvEHrV","sessionID":"SESSION","action":"shell","resources":["ls"],"save":["ls *"],"source":{"type":"tool","messageID":"msg_121538b57001Kv7ZEUkNAMigQ0","id":"call_0_mock-1791560485767"}}}
+{"type":"permission.replied","data":{"sessionID":"SESSION","requestID":"per_121538c11001Z27ixSxPPvEHrV","reply":"once"}}
+{"type":"session.tool.progress","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538b57001Kv7ZEUkNAMigQ0","id":"call_0_mock-1791560485767","metadata":{"shellID":"sh_121538c1d001mE5r5toYrVoIwN"}}}
+{"type":"session.tool.success","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538b57001Kv7ZEUkNAMigQ0","id":"call_0_mock-1791560485767","content":[{"type":"text","text":"README.md\n"}],"metadata":{"status":"completed","truncated":false,"exit":0},"executed":false}}
+{"type":"session.step.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538b57001Kv7ZEUkNAMigQ0","finish":"tool-calls","rawFinish":"tool_calls","cost":0,"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"snapshot":"49092bc611d561f69a2ab5dd83f3c327c74700f6","files":[]}}
+{"type":"session.usage.updated","data":{"sessionID":"SESSION","cost":0,"tokens":{"input":3,"output":3,"reasoning":0,"cache":{"read":0,"write":0}}}}
+{"type":"session.step.started","data":{"sessionID":"SESSION","agent":"build","model":{"id":"mock","providerID":"mock"},"assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr","snapshot":"49092bc611d561f69a2ab5dd83f3c327c74700f6","started":1791560486012}}
+{"type":"session.text.started","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr","ordinal":0}}
+{"type":"session.text.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr","ordinal":0,"delta":"Done. The project "}}
+{"type":"session.text.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr","ordinal":0,"delta":"has one readme "}}
+{"type":"session.text.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr","ordinal":0,"delta":"and nothing else "}}
+{"type":"session.text.delta","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr","ordinal":0,"delta":"to report."}}
+{"type":"session.text.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr","ordinal":0,"text":"Done. The project has one readme and nothing else to report."}}
+{"type":"session.step.streamed","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr"}}
+{"type":"session.step.ended","data":{"sessionID":"SESSION","assistantMessageID":"msg_121538c54001IUAUVNQv9rgZPr","finish":"stop","rawFinish":"stop","cost":0,"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"snapshot":"49092bc611d561f69a2ab5dd83f3c327c74700f6","files":[]}}
+{"type":"session.usage.updated","data":{"sessionID":"SESSION","cost":0,"tokens":{"input":4,"output":4,"reasoning":0,"cache":{"read":0,"write":0}}}}
+{"type":"session.execution.succeeded","data":{"sessionID":"SESSION"}}
