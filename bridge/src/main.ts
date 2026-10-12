@@ -99,6 +99,13 @@ const slack: SlackApi = {
       blocks: cleanBlocks(blocks) as never,
     });
   },
+  async remove(channel, ts) {
+    await app.client.chat.delete({ channel, ts });
+  },
+  async react(channel, timestamp, name, on) {
+    if (on) await app.client.reactions.add({ channel, timestamp, name });
+    else await app.client.reactions.remove({ channel, timestamp, name });
+  },
   async ephemeral(channel, user, thread_ts, text) {
     await app.client.chat.postEphemeral({
       channel,

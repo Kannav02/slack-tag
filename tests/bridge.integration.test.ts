@@ -81,6 +81,7 @@ async function harness(t: TestContext) {
   const catalog = { emptyLists: 0 };
   const unexpected: string[] = [];
   const replies: Record<string, unknown>[] = [];
+  const reactions: string[] = [];
   const fetched: { path: string; authorization: string | undefined }[] = [];
   const streams = new Set<ServerResponse>();
   let child: Bridge | undefined;
@@ -170,6 +171,16 @@ async function harness(t: TestContext) {
     if (path === "/api/auth.test") return json({ ok: true, user_id: "UBOT", team_id: "TTEST" });
     if (path === "/api/apps.connections.open")
       return json({ ok: true, url: `${base.replace("http:", "ws:")}/socket` });
+    if (path === "/api/reactions.add" || path === "/api/reactions.remove") {
+      const { name, timestamp } = anyCall.parse(args);
+      reactions.push(`${path.endsWith("add") ? "+" : "-"}${String(name)}@${String(timestamp)}`);
+      return json({ ok: true });
+    }
+    if (path === "/api/chat.delete") {
+      const slack = slackCall.parse(args);
+      messages.push({ method: "chat.delete", ...slack, ts: slack.ts ?? "" });
+      return json({ ok: true });
+    }
     if (["/api/chat.postMessage", "/api/chat.update", "/api/chat.postEphemeral"].includes(path)) {
       const slack = slackCall.parse(args);
       const ts = slack.ts ?? `200.${++sequence}`;
@@ -379,6 +390,7 @@ async function harness(t: TestContext) {
     prompts,
     calls,
     replies,
+    reactions,
     fetched,
     catalog,
     unexpected,
@@ -767,6 +779,115 @@ await test(
     h.send({ ts: "400.3", text: "<@UBOT> /model text-only" });
     await reply("400.3", /model list is still loading/);
     assert.equal(h.sessions.length, 0);
+    assert.deepEqual(h.unexpected, []);
+  },
+);
+
+// The event stream recorded from a real OpenCode 2.0.15 run (spike/v2/record.sh): a note, three tool steps
+// (one failed, one behind an approval), and a final answer, with paths rewritten to /project.
+const recorded = (await readFile(join(root, "tests/fixtures/opencode-progress-run.jsonl"), "utf8"))
+  .trim()
+  .split("\n")
+  .map((line) =>
+    z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) }).parse(JSON.parse(line)),
+  );
+
+await test(
+  "a run shows a progress card above the answer, and reactions on the prompt",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t);
+    const thread = (ts: string) => h.messages.filter((m) => m.thread_ts === ts || m.ts === ts);
+    const card = (ts: string) => {
+      const post = h.messages.find((m) => m.thread_ts === ts && m.method === "chat.postMessage");
+      return { post, last: h.messages.findLast((m) => m.ts === post?.ts) };
+    };
+
+    h.send({ ts: "400.1" });
+    await h.until(() => h.prompts.length === 1);
+    const sessionID = h.sessions[0]?.id ?? "";
+    for (const { type, data } of recorded)
+      h.emit(
+        type,
+        sessionID,
+        undefined,
+        anyCall.parse(JSON.parse(JSON.stringify(data).replaceAll("SESSION", sessionID))),
+      );
+    await h.until(() => h.reactions.includes("+white_check_mark@400.1"));
+    await h.until(() => /Done/.test(card("400.1").last?.text ?? ""));
+
+    const { post, last } = card("400.1");
+    assert.equal(post?.text, "*Working…*");
+    assert.match(last?.text ?? "", /^\*✓ Done\* · 4 steps · 0:0\d$/m);
+    assert.deepEqual(last?.text?.split("\n").slice(1), [
+      "✓ Read `README.md`",
+      "✓ Searched the code",
+      "✗ Read `missing.md`",
+      "✓ Ran a command",
+    ]);
+    // The card was posted first, so the answer follows it; text blocks are separated by a blank line.
+    const answer = thread("400.1").filter((m) => m.blocks?.[0]?.type === "markdown");
+    assert.ok(h.messages.indexOf(post!) < h.messages.indexOf(answer[0]!));
+    assert.equal(
+      h.messages.findLast((m) => m.ts === answer[0]?.ts)?.text,
+      "Let me check the readme first.\n\nTwo more checks.\n\nDone. The project has one readme and nothing else to report.",
+    );
+    // Thirteen tool and approval events reached the bridge, but the card is only edited a few times.
+    assert.ok(
+      h.messages.filter((m) => m.ts === post?.ts && m.method === "chat.update").length <= 3,
+    );
+    assert.deepEqual(h.reactions, ["+eyes@400.1", "-eyes@400.1", "+white_check_mark@400.1"]);
+    assert.equal(
+      h.db.prepare("SELECT state FROM replies WHERE message_ts = ?").get(post!.ts)?.state,
+      "done",
+    );
+
+    // Tool input never reaches Slack: a path outside the project is not named, and commands are never shown.
+    h.send({ ts: "400.2" });
+    await h.until(() => h.prompts.length === 2);
+    const second = h.sessions[1]?.id ?? "";
+    h.emit("session.execution.started", second);
+    h.emit("session.tool.input.started", second, undefined, {
+      sessionID: second,
+      id: "c1",
+      name: "read",
+    });
+    h.emit("session.tool.called", second, undefined, {
+      sessionID: second,
+      id: "c1",
+      input: { path: "/etc/pw-secret" },
+    });
+    h.emit("session.tool.input.started", second, undefined, {
+      sessionID: second,
+      id: "c2",
+      name: "shell",
+    });
+    h.emit("session.tool.called", second, undefined, {
+      sessionID: second,
+      id: "c2",
+      input: { command: "echo pw-secret" },
+    });
+    h.emit("session.execution.failed", second, undefined, {
+      sessionID: second,
+      error: { message: "boom" },
+    });
+    await h.until(() => h.reactions.includes("+x@400.2"));
+    await h.until(() => /Failed/.test(card("400.2").last?.text ?? ""));
+    assert.match(
+      card("400.2").last?.text ?? "",
+      /◌ Reading `a file outside the project`\n◌ Running a command$/,
+    );
+    assert.ok(!JSON.stringify(h.messages).includes("pw-secret"));
+
+    // A run without tools leaves no card behind.
+    h.send({ ts: "400.3" });
+    await h.until(() => h.prompts.length === 3);
+    const third = h.sessions[2]?.id ?? "";
+    h.emit("session.execution.started", third);
+    h.emit("session.text.delta", third, "Short answer.");
+    h.emit("session.execution.succeeded", third);
+    await h.until(() => h.messages.some((m) => m.method === "chat.delete"));
+    assert.equal(h.messages.find((m) => m.method === "chat.delete")?.ts, card("400.3").post?.ts);
     assert.deepEqual(h.unexpected, []);
   },
 );

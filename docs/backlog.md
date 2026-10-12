@@ -16,6 +16,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
 | DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
+| UX-1 | Show run progress in Slack threads | Medium | Card and reactions implemented; dev Slack check pending |
 
 ## Current behavior
 
@@ -109,6 +110,7 @@ Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that
 
 - **CMD-1 Commands:** a mention whose text starts with `/init`, `/review`, `/model`, `/stop` or `/compact` is a command; any other leading `/` stays a prompt. `/init` and `/review` run OpenCode server commands in the thread's session. `/model` lists enabled models from the channel model's provider and switches only the thread's session; attachments are checked against the session's current model. `/stop` interrupts and `/compact` requests compaction. Verified with integration tests and against real OpenCode 2.0.15 with a scripted model; not yet checked in a development Slack workspace (Slack may reject thread replies starting with `/`, so commands are written after the mention).
 - **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, key proxy, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
+- **UX-1 Run progress:** when an execution starts, the bridge posts a progress card in the thread above the answer, edits it at most once a second as tools run (`◌` running, `✓` done, `✗` failed, `⏸` waiting for approval), and turns it into a summary at the end, or deletes it when no tool ran. The prompt gets 👀 while its run is active, then ✅ or ❌. Cards name only the tool and, for read/edit/write, a path relative to the project; tool input never reaches Slack. Separate text blocks in a reply get a blank line between them. This is a read-only display, not the stop/status controls SPEC.md leaves out. Verified with integration tests that replay an event stream recorded from real OpenCode 2.0.15 (`spike/v2/record.sh`). Needs the `reactions:write` bot scope; not yet checked in a development Slack workspace. Slack's native status line (`assistant.threads.setStatus`) is a follow-up once it is verified in channel threads.
 - **DEMO-1 Screenshot demos:** let the agent show that a feature works by driving a headless browser and posting screenshots or short recordings to the Slack thread, and later to the PR. See the proposal below.
 
 ## DEMO-1 Screenshot demos: proposal, not a final design
