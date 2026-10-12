@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { OpenCode, type OpenCodeEvent } from "@opencode/client";
 import { POLICY_VERSION } from "../../plugin/src/policy.ts";
 import { definition } from "../../plugin/src/rpc.ts";
@@ -65,11 +66,19 @@ export async function createSession(
   ).id;
 }
 
+// OpenCode loads its model catalog in the background and lists no models until it finishes,
+// so an empty list is retried for a few seconds before it is believed.
+async function catalog(client: Client) {
+  for (let attempt = 1; ; attempt++) {
+    const { data } = await client.model.list();
+    if (data.length || attempt === 10) return data;
+    await sleep(500);
+  }
+}
+
 export async function inputsOf(client: Client, model: string): Promise<readonly string[]> {
   const { providerID, id } = modelOf(model);
-  const found = (await client.model.list()).data.find(
-    (m) => m.providerID === providerID && m.id === id,
-  );
+  const found = (await catalog(client)).find((m) => m.providerID === providerID && m.id === id);
   return found?.capabilities.input ?? [];
 }
 
@@ -79,7 +88,7 @@ export async function modelsOf(
   model: string,
 ): Promise<{ spec: string; inputs: readonly string[] }[]> {
   const { providerID } = modelOf(model);
-  return (await client.model.list()).data
+  return (await catalog(client))
     .filter((m) => m.providerID === providerID && m.enabled)
     .map((m) => ({ spec: specOf(m), inputs: m.capabilities.input }));
 }
