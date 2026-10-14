@@ -57,7 +57,7 @@ await test("start-project.sh starts only checked projects and passes Docker only
 
   const envOf = (project: string, extra = "") =>
     `SLACK_TAG_PROJECT=${project}\nSLACK_TAG_PORT=4102\nSLACK_TAG_PASSWORD=${password}\nSLACK_TAG_NET=3\n${extra}`;
-  async function start(name: string, envFile?: string) {
+  async function start(name: string, envFile?: string, gitProxy?: string) {
     if (envFile !== undefined) await writeFile(join(state, "projects", `${name}.env`), envFile);
     return run("sh", [script, name], {
       env: {
@@ -65,6 +65,7 @@ await test("start-project.sh starts only checked projects and passes Docker only
         SLACK_TAG_STATE_DIR: state,
         SLACK_TAG_PROJECTS_ROOT: projects,
         SLACK_TAG_IMAGE: "operator-image",
+        ...(gitProxy ? { GIT_PROXY_ENV_FILE: gitProxy } : {}),
       },
     }).then(
       () => "started",
@@ -105,7 +106,7 @@ await test("start-project.sh starts only checked projects and passes Docker only
 
   // A valid project starts; extra lines in the bridge-written env file never reach Docker.
   const planted =
-    "SLACK_TAG_IMAGE=attacker-image\nPROXY_ENV_FILE=/etc/shadow\nSLACK_BOT_TOKEN=xoxb-x\n";
+    "SLACK_TAG_IMAGE=attacker-image\nPROXY_ENV_FILE=/etc/shadow\nGIT_PROXY_ENV_FILE=/etc/attacker\nSLACK_BOT_TOKEN=xoxb-x\n";
   assert.equal(await start("app", envOf(join(projects, "app"), planted)), "started");
   assert.deepEqual(await dockerCalls(), [
     `compose -p slack-tag-app -f ${join(root, "deploy/project.yaml")} --env-file /dev/null up -d`,
@@ -128,6 +129,19 @@ await test("start-project.sh starts only checked projects and passes Docker only
   }
   assert.doesNotMatch(
     dockerEnv,
-    /attacker-image|\/etc\/shadow|xoxb|SLACK_TAG_PROJECTS_ROOT|SLACK_TAG_STATE_DIR/,
+    /attacker-image|\/etc\/shadow|GIT_PROXY_ENV_FILE|xoxb|SLACK_TAG_PROJECTS_ROOT|SLACK_TAG_STATE_DIR/,
+  );
+  // An operator opts in one systemd instance; its explicit path reaches only the override.
+  assert.equal(
+    await start("app", envOf(join(projects, "app")), "/etc/slack-tag/git/app.env"),
+    "started",
+  );
+  assert.match(
+    (await dockerCalls()).at(-1)!,
+    /git-proxy-project.yaml --env-file \/dev\/null up -d$/,
+  );
+  assert.match(
+    await readFile(join(work, "docker.env"), "utf8"),
+    /^GIT_PROXY_ENV_FILE=\/etc\/slack-tag\/git\/app.env$/m,
   );
 });

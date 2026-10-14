@@ -1,0 +1,19 @@
+# Optional override for registered project.yaml; inherits the same isolated proxy definition.
+services:
+  git-proxy:
+    extends: { file: git-proxy-alpha.yaml, service: git-proxy }
+    networks: !override
+      project: { ipv4_address: "172.31.${SLACK_TAG_NET:?set SLACK_TAG_NET}.254" }
+  opencode:
+    depends_on: [git-proxy]
+    extra_hosts: ["git-proxy:172.31.${SLACK_TAG_NET}.254"]
+    environment:
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: url.http://git-proxy:8081/.insteadOf
+      GIT_CONFIG_VALUE_0: "git@github.com-kannav02:"
+      GIT_CONFIG_KEY_1: url.http://git-proxy:8081/.insteadOf
+      GIT_CONFIG_VALUE_1: "git@github.com:"
+      GIT_CONFIG_KEY_2: url.http://git-proxy:8081/.insteadOf
+      GIT_CONFIG_VALUE_2: "https://github.com/"
+      GIT_CONFIG_KEY_3: url.http://git-proxy:8081/.insteadOf
+      GIT_CONFIG_VALUE_3: "ssh://git@github.com-kannav02/"

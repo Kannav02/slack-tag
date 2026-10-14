@@ -1,0 +1,28 @@
+# Optional override for compose.yaml's alpha. One private-repository credential per project.
+services:
+  git-proxy:
+    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.0.15}
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 64
+    env_file: ${GIT_PROXY_ENV_FILE:?set GIT_PROXY_ENV_FILE}
+    command: ["node", "--experimental-strip-types", "/opt/slack-tag/proxy/git-proxy.ts"]
+    networks:
+      alpha: { ipv4_address: 172.30.1.254 }
+  alpha:
+    depends_on: [git-proxy]
+    extra_hosts: ["git-proxy:172.30.1.254"]
+    environment:
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: url.http://git-proxy:8081/.insteadOf
+      GIT_CONFIG_VALUE_0: "git@github.com-kannav02:"
+      GIT_CONFIG_KEY_1: url.http://git-proxy:8081/.insteadOf
+      GIT_CONFIG_VALUE_1: "git@github.com:"
+      GIT_CONFIG_KEY_2: url.http://git-proxy:8081/.insteadOf
+      GIT_CONFIG_VALUE_2: "https://github.com/"
+      GIT_CONFIG_KEY_3: url.http://git-proxy:8081/.insteadOf
+      GIT_CONFIG_VALUE_3: "ssh://git@github.com-kannav02/"
