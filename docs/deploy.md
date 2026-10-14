@@ -114,7 +114,7 @@ Git in the agent has no personal SSH keys or SSH client. Add a repository-scoped
 3. For the fixed `alpha` project (GEM), rebuild the image and include the override on every subsequent Compose command:
    ```sh
    sudo env GIT_CREDENTIAL_USER=devuser GIT_PROXY_ENV_FILE=/etc/slack-tag/git/alpha.env \
-     sh deploy/with-git-credential.sh docker compose -f deploy/compose.yaml -f deploy/git-proxy-alpha.yaml up -d --build
+     sh deploy/with-git-credential.sh docker compose --env-file /etc/slack-tag/compose.env -f deploy/compose.yaml -f deploy/git-proxy-alpha.yaml up -d --build
    ```
    The proxy joins only alpha's network at `172.30.1.254`, with no published port. Check that `.254` is free before applying. Beta is unchanged; another fixed project needs its own sidecar, network address and mapping file.
 4. For a registered project, use `systemctl edit slack-tag-project@<name>.service` and add:
@@ -127,3 +127,5 @@ Git in the agent has no personal SSH keys or SSH client. Add a repository-scoped
 5. Verify `git ls-remote origin`, `git fetch origin`, `git pull --ff-only origin main`, then a normal push to a disposable branch. Verify rewriting/deleting that branch is rejected by GitHub rules; delete the test branch administratively afterward. Do not force-push a production branch to test protections.
 
 The overrides rewrite GitHub HTTPS URLs and personal `github.com-kannav02` SSH aliases to the proxy without changing the mounted `.git/config`. The host login may access multiple repositories, but only the proxy receives its token. Its exact repository and smart-HTTP endpoint allowlist prevents using the credential for another repository; redirects and upstream error details are not returned. Submodules, LFS, other SSH aliases and repositories need separate configuration and are not supported by this proxy. `git push origin <branch>` works; `git push -u` may fail to save tracking metadata because `.git/config` remains read-only. Removing the override/per-instance setting and recreating the agent disables proxy routing; remove the unused sidecar as well. No production credentials or deployment are included in this change.
+
+Verified on Hetzner with the existing `devuser` Kannav02 login: a temporary loopback proxy completed `ls-remote` and a shallow fetch of `maraja/gem-research-suite`; another repository and disabled writes returned 403. No production services changed. Integration tests additionally exercise clone, pull, normal push and upstream force/deletion rejection against a disposable Git server.
