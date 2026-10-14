@@ -53,11 +53,32 @@ await test(
     }
     await commit(seed, "first");
     await git(["push", "origin", "main"], seed);
+    // Distinct advertised tips make clone's upload-pack request large enough for Git's gzip transport.
+    for (let i = 0; i < 40; i++) {
+      const tip = await git(
+        [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.com",
+          "commit-tree",
+          "main^{tree}",
+          "-p",
+          "main",
+          "-m",
+          String(i),
+        ],
+        bare,
+      );
+      await git(["update-ref", "refs/heads/extra-" + i, tip.stdout.trim()], bare);
+    }
+    let gzipRequests = 0;
     let redirect = false;
     let requests = 0;
     // Real Git smart HTTP backend stands in only for external GitHub.
     const upstream = createServer((req, res) => {
       requests++;
+      if (req.headers["content-encoding"] === "gzip") gzipRequests++;
       if (req.headers.authorization !== auth) return void res.writeHead(401).end();
       if (redirect)
         return void res
@@ -74,6 +95,7 @@ await test(
               PATH_INFO: url.pathname,
               QUERY_STRING: url.search.slice(1),
               REQUEST_METHOD: req.method!,
+              HTTP_CONTENT_ENCODING: String(req.headers["content-encoding"] ?? ""),
               CONTENT_TYPE: req.headers["content-type"] ?? "",
               CONTENT_LENGTH: String(body.length),
               REMOTE_USER: "test",
@@ -145,6 +167,7 @@ await test(
     };
     const agentGit = (args: string[], cwd = work) => run("git", args, { cwd, env: agentEnv });
     await agentGit(["clone", original, "agent"]);
+    assert.ok(gzipRequests > 0, "real Git clone exercised compressed smart HTTP requests");
     const agent = join(work, "agent");
     assert.equal(await readFile(join(agent, "data.txt"), "utf8"), "first");
     const configBefore = await readFile(join(agent, ".git/config"), "utf8");
@@ -173,6 +196,16 @@ await test(
     ]) {
       assert.equal((await fetch(proxy + path)).status, 403);
     }
+    assert.equal(
+      (
+        await fetch(`${proxy}/owner/repo.git/git-upload-pack`, {
+          method: "POST",
+          headers: { "content-encoding": "br" },
+          body: "bad",
+        })
+      ).status,
+      415,
+    );
     assert.equal(requests, before);
     const readOnly = await start(false);
     assert.equal(

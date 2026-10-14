@@ -18,6 +18,8 @@ const services = [
 ];
 
 const server = createServer((req, res) => {
+  const encoding = req.headers["content-encoding"];
+  if (encoding && encoding !== "gzip") return void res.writeHead(415).end("unsupported encoding");
   const service = services.find((s) =>
     req.method === "GET"
       ? req.url === `/${repository}.git/info/refs?service=${s}`
@@ -32,6 +34,7 @@ const server = createServer((req, res) => {
       method: req.method,
       headers: {
         authorization,
+        ...(encoding ? { "content-encoding": encoding } : {}),
         "content-type": `application/x-${service}-request`,
         ...(req.headers["git-protocol"] === "version=2" ? { "git-protocol": "version=2" } : {}),
       },
