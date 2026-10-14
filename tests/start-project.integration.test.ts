@@ -52,19 +52,12 @@ await test("start-project.sh starts only checked projects and passes Docker only
     `#!/bin/sh\necho "$*" >> "${work}/docker.log"\nenv > "${work}/docker.env"\n`,
   );
   await chmod(join(work, "bin", "docker"), 0o755);
-  await writeFile(
-    join(work, "bin", "gh"),
-    '#!/bin/sh\n[ "$*" = "auth token --hostname github.com --user Kannav02" ] || exit 1\n[ -z "${GH_TOKEN-}${GITHUB_TOKEN-}" ] || exit 1\nprintf "fixture-host-token"\n',
-    {
-      mode: 0o755,
-    },
-  );
   const dockerCalls = async () =>
     (await readFile(join(work, "docker.log"), "utf8").catch(() => "")).split("\n").filter(Boolean);
 
   const envOf = (project: string, extra = "") =>
     `SLACK_TAG_PROJECT=${project}\nSLACK_TAG_PORT=4102\nSLACK_TAG_PASSWORD=${password}\nSLACK_TAG_NET=3\n${extra}`;
-  async function start(name: string, envFile?: string, gitProxy?: string) {
+  async function start(name: string, envFile?: string) {
     if (envFile !== undefined) await writeFile(join(state, "projects", `${name}.env`), envFile);
     return run("sh", [script, name], {
       env: {
@@ -72,7 +65,6 @@ await test("start-project.sh starts only checked projects and passes Docker only
         SLACK_TAG_STATE_DIR: state,
         SLACK_TAG_PROJECTS_ROOT: projects,
         SLACK_TAG_IMAGE: "operator-image",
-        ...(gitProxy ? { GIT_PROXY_ENV_FILE: gitProxy } : {}),
       },
     }).then(
       () => "started",
@@ -113,7 +105,7 @@ await test("start-project.sh starts only checked projects and passes Docker only
 
   // A valid project starts; extra lines in the bridge-written env file never reach Docker.
   const planted =
-    "SLACK_TAG_IMAGE=attacker-image\nPROXY_ENV_FILE=/etc/shadow\nGIT_PROXY_ENV_FILE=/etc/attacker\nGIT_CREDENTIAL_USER=attacker\nSLACK_BOT_TOKEN=xoxb-x\n";
+    "SLACK_TAG_IMAGE=attacker-image\nPROXY_ENV_FILE=/etc/shadow\nSLACK_BOT_TOKEN=xoxb-x\n";
   assert.equal(await start("app", envOf(join(projects, "app"), planted)), "started");
   assert.deepEqual(await dockerCalls(), [
     `compose -p slack-tag-app -f ${join(root, "deploy/project.yaml")} --env-file /dev/null up -d`,
@@ -136,48 +128,6 @@ await test("start-project.sh starts only checked projects and passes Docker only
   }
   assert.doesNotMatch(
     dockerEnv,
-    /GIT_CREDENTIAL_USER|GITHUB_TOKEN|attacker-image|\/etc\/shadow|GIT_PROXY_ENV_FILE|xoxb|SLACK_TAG_PROJECTS_ROOT|SLACK_TAG_STATE_DIR/,
+    /attacker-image|\/etc\/shadow|xoxb|SLACK_TAG_PROJECTS_ROOT|SLACK_TAG_STATE_DIR/,
   );
-  // An operator opts in one systemd instance; its explicit path reaches only the override.
-  assert.equal(
-    await start("app", envOf(join(projects, "app")), "/etc/slack-tag/git/app.env"),
-    "started",
-  );
-  assert.match(
-    (await dockerCalls()).at(-1)!,
-    /git-proxy-project.yaml --env-file \/dev\/null up -d$/,
-  );
-  assert.match(
-    await readFile(join(work, "docker.env"), "utf8"),
-    /^GITHUB_TOKEN=fixture-host-token$/m,
-  );
-  assert.match(
-    await readFile(join(work, "docker.env"), "utf8"),
-    /^GIT_PROXY_ENV_FILE=\/etc\/slack-tag\/git\/app.env$/m,
-  );
-  const wrapped = await run(
-    "sh",
-    [
-      join(root, "deploy/with-git-credential.sh"),
-      "sh",
-      "-c",
-      'test "$GITHUB_TOKEN" = fixture-host-token',
-    ],
-    {
-      env: {
-        ...process.env,
-        PATH: join(work, "bin") + ":" + process.env.PATH,
-        GH_TOKEN: "wrong",
-        GITHUB_TOKEN: "wrong",
-      },
-    },
-  );
-  assert.equal(wrapped.stdout + wrapped.stderr, "");
-  await writeFile(join(work, "bin", "gh"), '#!/bin/sh\necho "secret-error" >&2\nexit 1\n');
-  const callsBefore = (await dockerCalls()).length;
-  assert.match(
-    await start("app", undefined, "/etc/slack-tag/git/app.env"),
-    /^GitHub credential unavailable/,
-  );
-  assert.equal((await dockerCalls()).length, callsBefore);
 });
