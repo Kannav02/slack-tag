@@ -17,6 +17,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
 | DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
 | UX-1 | Show run progress in Slack threads | Medium | Card and reactions implemented; dev Slack check pending |
+| MCP-1 | Connect MCP servers to project OpenCode servers | Low | Research/design |
 
 ## Current behavior
 
@@ -112,6 +113,7 @@ Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that
 - **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, key proxy, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
 - **UX-1 Run progress:** when an execution starts, the bridge posts a progress card in the thread above the answer, edits it at most once a second as tools run (`◌` running, `✓` done, `✗` failed, `⏸` waiting for approval), and turns it into a summary at the end, or deletes it when no tool ran. The prompt gets 👀 while its run is active, then ✅ or ❌. Cards name only the tool and, for read/edit/write, a path relative to the project; tool input never reaches Slack. Separate text blocks in a reply get a blank line between them. This is a read-only display, not the stop/status controls SPEC.md leaves out. Verified with integration tests that replay an event stream recorded from real OpenCode 2.0.15 (`spike/v2/record.sh`). Needs the `reactions:write` bot scope; not yet checked in a development Slack workspace. Slack's native status line (`assistant.threads.setStatus`) is a follow-up once it is verified in channel threads.
 - **DEMO-1 Screenshot demos:** let the agent show that a feature works by driving a headless browser and posting screenshots or short recordings to the Slack thread, and later to the PR. See the proposal below.
+- **MCP-1 MCP servers:** give the agent MCP tools in every project (global config) or one project (its read-only `opencode.jsonc`). See the notes below.
 
 ## DEMO-1 Screenshot demos: proposal, not a final design
 
@@ -130,3 +132,15 @@ Open questions:
 - Record GIFs or short videos as well as stills.
 
 Acceptance: in a registered project, asking the agent to demo a page posts at least one screenshot of the running app in the thread, the agent's container never receives the Slack or GitHub token, and the sidecar cannot reach another project's containers.
+
+## MCP-1 MCP servers: notes, not a design
+
+Discussed 2026-10-14 and parked. Found by reading the OpenCode 2.0.15 schema and CLI binary; nothing here was run end to end.
+
+- **Config:** `mcp.servers.<name>` takes `{ type: "local", command: [...], environment }` or `{ type: "remote", url, headers, oauth }`. Global config (`deploy/opencode.global.jsonc`) reaches every project but needs an image rebuild; a project's `opencode.jsonc` reaches one project and needs a container restart. Whether a project `mcp` block merges with the global one is untested.
+- **Approvals:** each MCP tool call is a permission request with action `<server>_<tool>` and resource `*`. Policy version 3 answers ask for unknown actions, so every call waits for the owner. Auto-allowing read-only tools means a policy change and version bump in the plugin and bridge together.
+- **Secrets:** config supports `{env:VAR}` and `{file:path}`. `stripSecrets` only removes `OPENCODE_API_KEY`, `OPENCODE_SERVER_PASSWORD` and `SLACK_*`, so a new token variable would reach agent shells. Prefer `{file:…}` readable only by uid 1000, or extend the pattern.
+- **Local servers:** started by the server, not through `agent-shell`, so expected to run as uid 1000 with access to `/data` and the server password (not verified). Only trusted servers, pinned in the image; no runtime `npx`.
+- **Network:** the firewall blocks project containers from the host, so self-hosted MCP servers need a sidecar on the project network (as DEMO-1 proposes for Playwright). Internet-hosted ones work.
+
+Suggested first step: one remote, read-only MCP server in the global config with its token via `{file:…}`, then decide which tools to auto-allow.
