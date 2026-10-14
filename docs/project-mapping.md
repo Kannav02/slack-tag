@@ -27,6 +27,17 @@ Do not repoint an existing channel at a different server or replace its data vol
 
 ## First deployed project
 
+### Current production mapping (2026-10-14)
+
+| Slack channel | Channel ID | VPS project | Server | Default model |
+| --- | --- | --- | --- | --- |
+| `research` | `C0C2YBS6P7U` | `/home/devuser/projects/gem-research-suite` | `127.0.0.1:4101` (`deploy-alpha-1`) | `opencode-go/claude-haiku-5-5` |
+| `dogfooding-channel` | `C0C6NN5Q16G` | `/srv/slack-tag/projects/temp-ideas` | `127.0.0.1:4103` (`slack-tag-temp-ideas-opencode-1`) | `opencode-go/claude-haiku-5-5` |
+
+Research is the renamed required workspace channel. Internal configuration names remain `gem-research-suite` and `temp-ideas` to preserve upload inbox mounts. `social` and `new-channel` are archived. The obsolete verification project is archived under `/srv/slack-tag/archived-projects/deploy-verification`; its containers/network were removed, but its volume and conversation history were retained. New registrations also default to Haiku 5.5. Existing thread model selections are unchanged.
+
+### Original deployment
+
 Recorded deployment on 2026-09-27; see the first live VPS deployment section in [verification findings](findings.md) for checks and limitations.
 
 | Setting | Value |
