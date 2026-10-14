@@ -190,3 +190,7 @@ With owner authorization, tested `b67a508` through native Slack in [the smoke-te
 Uploaded a synthetic text file containing `Verification token: UPLOAD-B67A508-7C2F`. The first request to read it with a tool failed because the model searched the project folder; its answer used the inline attachment content. An explicit shell read of `/inbox/1791947449.923669/slack-smoke-b67a508.txt` then completed successfully and returned the exact uploaded contents, verifying transport and container inbox access. No project files were changed. Database approval rows were not inspected during this smoke test because temporary root access had already been revoked.
 
 Reaction configuration remains blocked by browser account access: the developer page for production app `A0C4DEUGRAB` says the signed-in Chrome account is not a collaborator. No scopes or installation settings were changed; reactions remain unverified pending owner sign-in.
+
+## Live reaction verification (2026-10-14 Toronto)
+
+Signed into the app owner's Google account, added the bot scope `reactions:write`, and reinstalled `jeff` into Kannav Work with owner confirmation. In [a fresh smoke-test thread](https://kannavsknowledgebase.slack.com/archives/C0C6NN5Q16G/p1791986750272609), a request for a fixed response without tools received an eyes reaction, then a white tick and the exact reply `REACTION-SMOKE-OK`. This verifies reaction updates using the running production installation. SSH confirmed `slack-tag` active with `NRestarts=0`; no service restart or credential replacement was needed.
