@@ -174,3 +174,11 @@ Manual verification through the native Slack composer and authenticated Slack br
 Registration, project response, model switching and queue screenshots were saved as local artifacts. Two distinct Slack users were not available for a live test; teammate acceptance is verified by the simulated-service tests only. Live uploads, rejection and registered cross-project connectivity were not tested in this run.
 
 Both bridge/firewall services and all four containers remained active at the final check. Removed `/etc/sudoers.d/slack-tag-deploy` and verified that passwordless sudo was denied.
+
+## Progress display deployment (2026-10-13 Toronto / 2026-10-14 UTC)
+
+Deployed `b67a508` at 22:57 Toronto, including main through `e000f44` and a fix that preserves approval prompts when a progress-card update fails. A clean release archive passed `npm run check` on Node 24.21.0: all 12 integration tests passed. Backups of the application, credentials, service unit and stopped bridge state, plus the release archive, are under `/var/backups/slack-tag/20261014T025730Z-b67a508`.
+
+Only bridge source changed on the VPS; dependencies, plugin, deployment files and all six running containers were unchanged. Both configured channels (`deploy-verification`, `temp-ideas`) passed the plugin readiness check and had no active sessions before or after deployment. Source hashes matched the tested release; configuration and bridge credentials were unchanged. SQLite integrity passed, and all 13 thread, 34 reply and 4 approval rows matched the backup. The bridge runs as `slack-tag` with its existing sandbox, the firewall is active, and the service restart count is zero.
+
+Socket Mode initially logged pong timeouts, then connected at 22:58:42 Toronto. Slack authentication succeeds, but the installed bot token lacks `reactions:write`: progress cards can work, while prompt reactions require adding that bot scope and reinstalling the app. Live Slack progress, approval and upload checks remain an owner smoke test; no Slack messages were sent during deployment. Removed temporary deployment files and `/etc/sudoers.d/99-slack-tag-deploy`; a fresh SSH connection confirmed passwordless sudo was denied while both services remained active.
