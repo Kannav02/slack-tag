@@ -79,6 +79,7 @@ async function harness(t: TestContext) {
   ];
   // OpenCode answers its first model lists with an empty catalog while it is still loading.
   const catalog = { emptyLists: 0 };
+  const slackErrors = { updateTs: "" };
   const unexpected: string[] = [];
   const replies: Record<string, unknown>[] = [];
   const reactions: string[] = [];
@@ -183,6 +184,8 @@ async function harness(t: TestContext) {
     }
     if (["/api/chat.postMessage", "/api/chat.update", "/api/chat.postEphemeral"].includes(path)) {
       const slack = slackCall.parse(args);
+      if (path === "/api/chat.update" && slack.ts === slackErrors.updateTs)
+        return json({ ok: false, error: "message_not_found" });
       const ts = slack.ts ?? `200.${++sequence}`;
       messages.push({ method: path.split("/").at(-1), ...slack, ts });
       return json({ ok: true, ts, channel: slack.channel });
@@ -393,6 +396,7 @@ async function harness(t: TestContext) {
     reactions,
     fetched,
     catalog,
+    slackErrors,
     unexpected,
     logs: () => logs,
     until,
@@ -891,6 +895,55 @@ await test(
     assert.deepEqual(h.unexpected, []);
   },
 );
+
+await test("a failed progress update still posts and persists an approval", async (t) => {
+  const h = await harness(t);
+  h.send({ ts: "400.1" });
+  await h.until(() => h.prompts.length === 1);
+  const sessionID = h.sessions[0]?.id ?? "";
+  h.emit("session.execution.started", sessionID);
+  await h.until(() => h.messages.some((m) => m.text === "*Working…*"));
+  const card = h.messages.find((m) => m.text === "*Working…*");
+  assert.ok(card);
+  h.emit("session.tool.input.started", sessionID, undefined, {
+    sessionID,
+    id: "tool_approval",
+    name: "shell",
+  });
+  await h.until(() =>
+    h.messages.some((m) => m.ts === card.ts && /Running a command/.test(m.text ?? "")),
+  );
+  await delay(1100);
+  h.slackErrors.updateTs = card.ts;
+  h.emit("permission.asked", sessionID, undefined, {
+    id: "per_progress_failure",
+    sessionID,
+    action: "shell",
+    resources: ["rm -rf build"],
+    source: { id: "tool_approval" },
+  });
+  await h.until(() => h.prompted("per_progress_failure"));
+  const approval = h.prompted("per_progress_failure");
+  assert.ok(approval);
+  assert.match(h.logs(), /progress update failed:.*message_not_found/);
+  assert.equal(approval.thread_ts, "400.1");
+  assert.deepEqual(
+    {
+      ...h.db
+        .prepare("SELECT state, message_ts FROM approvals WHERE request_id = ?")
+        .get("per_progress_failure"),
+    },
+    { state: "pending", message_ts: approval.ts },
+  );
+  h.click("approve", "UOWNER", approval);
+  await h.until(() => h.replies.length === 1);
+  assert.deepEqual(h.replies[0], {
+    sessionID,
+    requestID: "per_progress_failure",
+    decision: "once",
+  });
+  assert.deepEqual(h.unexpected, []);
+});
 
 // Two fake OpenCode servers record which password reached them; Slack is never reached.
 await test(

@@ -419,7 +419,9 @@ export function createRouter(
   async function apply(event: AgentEvent, client: Client) {
     const run = runOf(event.data.sessionID);
     if (event.type === "permission.asked") {
-      await waiting(run, event.data.source?.id);
+      await waiting(run, event.data.source?.id).catch((error: unknown) =>
+        console.error("progress update failed:", errorText(error)),
+      );
       return ask(event.data, client);
     }
     // Succeeded, failed or interrupted: the project's next queued prompt may start.
