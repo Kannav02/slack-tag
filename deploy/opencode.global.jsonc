@@ -17,10 +17,5 @@
     { "action": "shell", "resource": "*", "effect": "ask" },
     { "action": "webfetch", "resource": "*", "effect": "ask" },
     { "action": "websearch", "resource": "*", "effect": "ask" }
-  ],
-  "experimental": {
-    "policies": [
-      { "action": "permission", "resource": "shell:git push *", "effect": "deny" }
-    ]
-  }
+  ]
 }

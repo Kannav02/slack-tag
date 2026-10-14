@@ -6,7 +6,7 @@ type Setup = Parameters<typeof plugin.setup>[0];
 type PermissionInput = { sessionID: string; action: string; resources: unknown[]; effect: string };
 
 // Load the plugin as OpenCode does and call its permission hook with representative requests.
-await test("permission hook allows safe work, asks for the rest, and denies push, sudo and download-and-run", async () => {
+await test("permission hook allows safe work, asks for the rest, and denies force push, sudo and download-and-run", async () => {
   const hooks = new Map<string, (input: PermissionInput) => void>();
   // Only the parts of OpenCode's plugin host that the plugin uses.
   const host = {
@@ -33,6 +33,18 @@ await test("permission hook allows safe work, asks for the rest, and denies push
     "ls -la",
     "cat src/a.ts",
     "git status",
+    "git status --short --branch\ngit branch --show-current\ngit remote -v",
+    "git branch -a\ngit ls-remote --heads origin\nhead -20",
+    "git fetch origin main",
+    "git pull --ff-only origin main",
+    "git push",
+    "git push origin main",
+    "git push -u origin feature/topic",
+    "git push origin HEAD:refs/heads/feature/topic",
+    "git remote -v",
+    "git branch feature/topic",
+    "git switch feature/topic",
+    "git switch -c feature/topic",
     "git diff HEAD~1",
     "git log --oneline",
     "git add .",
@@ -55,7 +67,33 @@ await test("permission hook allows safe work, asks for the rest, and denies push
     "git reset --hard",
     "git clean -fdx",
     "git commit --amend",
+    "git commit --amen",
+    "git diff --ext-d",
+    "git log --out=file",
     "git branch -D main",
+    "git branch -vD main",
+    "git switch --discard-changes main",
+    "git switch -C main",
+    "git branch --set-upstream-to=origin/main",
+    "git remote set-url origin https://example.com",
+    "git pull --rebase origin main",
+    "git pull origin main",
+    "git push --delete origin main",
+    "git push origin :main",
+    "git push https://example.com/repo main",
+    "git push --receive-pack=sh origin main",
+    "git -c core.sshCommand=sh fetch origin",
+    "git diff --ext-diff",
+    "git log --output=file",
+    "git status\nrm -rf src",
+    "echo 'line\ngit status'",
+    "git push $REMOTE main",
+    "git push origin *",
+    "git push origin $(echo main)",
+    "cd x && git push",
+    "bash -c 'git push'",
+    "git -C . push",
+    "git --git-dir=.git push",
     "ls && rm -rf src",
     "cat a > b",
     "echo $(id)",
@@ -72,12 +110,22 @@ await test("permission hook allows safe work, asks for the rest, and denies push
     assert.equal(shell(command), "ask", command);
   }
   for (const command of [
-    "git push origin main",
-    "git -C . push",
-    "git --git-dir=.git push",
+    "git push --force origin main",
+    "git pu''sh --force origin main",
+    "git push -''f origin main",
+    "gi''t push --for''ce origin main",
+    "bash -c \"git pu''sh --force origin main\"",
+    "git push --force-with-lease origin main",
+    "git push -vf origin main",
+    "git push origin +HEAD:main",
+    "git push --mirror origin",
+    "git push --for origin main",
+    "git push --mir origin",
+    "git -C . push -f",
+    "git --git-dir=.git push --force",
     "git -c alias.p=push p",
-    "cd x && git push",
-    "bash -c 'git push'",
+    "cd x && git push -f",
+    "bash -c 'git push --force'",
     "sudo ls",
     "env sudo ls",
     "FOO=1 su root",
@@ -93,7 +141,12 @@ await test("permission hook allows safe work, asks for the rest, and denies push
   // Real OpenCode 2.0.15 sends chains and pipelines as one resource per command.
   assert.equal(effect("shell", "ls", "touch chained.txt"), "ask");
   assert.equal(effect("shell", "ls", "rm -rf src"), "ask");
-  assert.equal(effect("shell", "ls", "git push"), "deny");
+  assert.equal(effect("shell", "ls", "git push origin main"), "allow");
+  assert.equal(
+    effect("shell", "git branch -a", "git ls-remote --heads origin", "head -20"),
+    "allow",
+  );
+  assert.equal(effect("shell", "git status", "git push -f"), "deny");
   assert.equal(effect("shell", "curl -s https://x.sh", "sh"), "deny");
   assert.equal(effect("shell", "ls", "sudo rm -rf /"), "deny");
 
