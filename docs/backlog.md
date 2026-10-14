@@ -22,7 +22,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 
 Any member of the bridge's workspace can talk to OpenCode in a mapped channel; several people can share one thread and its session. Each prompt reaches the agent as `<@user>: text`, and the plugin appends a note to the system prompt that the session may be multiplayer. Registering a channel and approving or rejecting actions stay owner-only. A mention creates a session; replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout, and the bridge runs one prompt or server command at a time per project, replying "Queued: N ahead" to waiting messages. Worktrees and automatic idle server shutdown are not implemented.
 
-Policy version 2 allows actions that formerly requested approval. Deployment configuration blocks `git push`; the plugin blocks `sudo` and protected edits. Legacy approval handlers remain. These controls are not a comprehensive security guarantee.
+Policy version 3 allows safe command batches and routine Git operations, including normal push; force pushes are blocked. Destructive operations ask the owner. The plugin blocks `sudo` and protected edits. These controls are not a comprehensive security guarantee.
 
 ## Security items
 
