@@ -46,13 +46,13 @@ fi
 # Docker sees only the checked values and the operator's own settings (unit EnvironmentFile or the developer's shell).
 set -- PATH="$PATH" HOME="${HOME:-/root}" SLACK_TAG_PROJECT="$project" SLACK_TAG_PORT="$port" \
   SLACK_TAG_PASSWORD="$password" SLACK_TAG_NET="$net" SLACK_TAG_INBOX="$inbox"
-for var in SLACK_TAG_RUNTIME SLACK_TAG_IMAGE PROXY_ENV_FILE DOCKER_HOST DOCKER_CONFIG DOCKER_CONTEXT GIT_PROXY_ENV_FILE; do
+for var in SLACK_TAG_RUNTIME SLACK_TAG_IMAGE PROXY_ENV_FILE DOCKER_HOST DOCKER_CONFIG DOCKER_CONTEXT GIT_PROXY_ENV_FILE GIT_CREDENTIAL_USER; do
   eval "val=\${$var-}"
   [ -n "$val" ] && set -- "$@" "$var=$val"
 done
 # Only a trusted operator environment can enable Git access, never the bridge-written env file.
 if [ -n "${GIT_PROXY_ENV_FILE:-}" ]; then
-  exec env -i "$@" docker compose -p "slack-tag-$name" -f "$deploy/project.yaml" \
+  exec env -i "$@" sh "$deploy/with-git-credential.sh" docker compose -p "slack-tag-$name" -f "$deploy/project.yaml" \
     -f "$deploy/git-proxy-project.yaml" --env-file /dev/null up -d
 fi
 exec env -i "$@" docker compose -p "slack-tag-$name" -f "$deploy/project.yaml" --env-file /dev/null up -d

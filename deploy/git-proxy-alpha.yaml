@@ -1,4 +1,4 @@
-# Optional override for compose.yaml's alpha. One private-repository credential per project.
+# Optional override for compose.yaml's alpha. Host credential, restricted to one repository per project.
 services:
   git-proxy:
     image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.0.15}
@@ -9,6 +9,8 @@ services:
     security_opt: ["no-new-privileges:true"]
     mem_limit: 128m
     pids_limit: 64
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN:?run deploy/with-git-credential.sh}
     env_file: ${GIT_PROXY_ENV_FILE:?set GIT_PROXY_ENV_FILE}
     command: ["node", "--experimental-strip-types", "/opt/slack-tag/proxy/git-proxy.ts"]
     networks:
