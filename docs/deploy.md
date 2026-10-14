@@ -107,6 +107,8 @@ Check out the previous commit in `/opt/slack-tag` and run the update steps. To s
 
 ## Private GitHub repositories (opt-in)
 
+For the request flow, URL rewriting and credential boundary, see [Git proxy](git-proxy.md).
+
 Git in the agent has no personal SSH keys or SSH client. Add a repository-scoped Git smart-HTTP proxy; do not mount your SSH directory or give the agent a token. Requires Docker Compose 2.24.4+ (`!override`). Deploy this separately from merging the code.
 
 1. Reuse the existing `gh` login for **Kannav02** on the host (`devuser` on Hetzner). `deploy/with-git-credential.sh` reads it at startup without printing it; no new token or SSH-key mount is needed. Store `deploy/git-proxy.env.example` as `/etc/slack-tag/git/<project>.env`, root-owned mode `0600`, inside a root-owned mode `0700` directory. Fill `GITHUB_REPOSITORY=owner/repository` (without `.git`); this file contains no token.
