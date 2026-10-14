@@ -9,6 +9,7 @@ Current permission policy (2026-10-02, policy version 3, replacing the 2026-09-2
 
 - Runs without asking: reads and searches (except `.env` files), edits inside the project outside protected paths, and shell commands (including newline batches and OpenCode command resources when every command is safe) from a named list: `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `grep`, `rg`, `find` (without `-delete`/`-exec`), `git status|log|diff|show|branch|add|commit`, remote listing, `ls-remote`, `fetch`, fast-forward-only `pull`, and ordinary `push` to configured remotes (without destructive flags, executable overrides or history rewriting), `npm|pnpm|yarn test|run|install|ci`, `pytest`, `make`, `tsc`, `node --test`.
 - Always refused, no prompt: force pushes (`--force*`, `-f`, `+refspec`, `--mirror`), `sudo`/`su`/`doas`, download-and-run (`curl … | sh`), and edits to protected OpenCode/Git configuration.
+- Force-push blocking inspects command text. Existing remote mirror or forced push-refspec configuration can make an ordinary push force updates; enforce GitHub branch rules for server-side protection.
 - Everything else asks the owner in Slack, including unparsed shell chains/pipelines, destructive Git operations, web fetch/search and unknown actions. No answer within the timeout, a plugin error, or a missing plugin never allows.
 
 ## Problem Statement

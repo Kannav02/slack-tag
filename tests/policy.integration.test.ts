@@ -111,6 +111,10 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   }
   for (const command of [
     "git push --force origin main",
+    "git pu''sh --force origin main",
+    "git push -''f origin main",
+    "gi''t push --for''ce origin main",
+    "bash -c \"git pu''sh --force origin main\"",
     "git push --force-with-lease origin main",
     "git push -vf origin main",
     "git push origin +HEAD:main",

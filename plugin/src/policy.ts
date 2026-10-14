@@ -50,7 +50,11 @@ const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn"]);
 const PACKAGE_SAFE = new Set(["test", "run", "install", "ci"]);
 const FIND_UNSAFE = /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/;
 
-const tokens = (text: string) => text.replace(/["']/g, " ").split(/\s+/).filter(Boolean);
+// Reuse shell lexing, then inspect nested shell strings conservatively for hard denies.
+function tokens(text: string): string[] {
+  const words = shellWords(text) ?? text.replace(/["']/g, "").split(/\s+/).filter(Boolean);
+  return words.flatMap((word) => (/[\s"']/.test(word) ? tokens(word) : [word]));
+}
 const base = (word: string) => word.slice(word.lastIndexOf("/") + 1);
 
 function gitSubcommand(words: string[], start: number): { sub?: string; aliased: boolean } {
