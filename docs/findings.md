@@ -194,3 +194,9 @@ Reaction configuration remains blocked by browser account access: the developer 
 ## Live reaction verification (2026-10-14 Toronto)
 
 Signed into the app owner's Google account, added the bot scope `reactions:write`, and reinstalled `jeff` into Kannav Work with owner confirmation. In [a fresh smoke-test thread](https://kannavsknowledgebase.slack.com/archives/C0C6NN5Q16G/p1791986750272609), a request for a fixed response without tools received an eyes reaction, then a white tick and the exact reply `REACTION-SMOKE-OK`. This verifies reaction updates using the running production installation. SSH confirmed `slack-tag` active with `NRestarts=0`; no service restart or credential replacement was needed.
+
+## Haiku default (2026-10-14 Toronto)
+
+With owner authorization, changed both configured channel defaults and `onboarding.model` to `opencode-go/claude-haiku-5-5`. Existing thread model selections were preserved. Backed up the prior configuration to `/var/backups/slack-tag/haiku-default-2026-10-14T14-32-21-567Z.json` and atomically replaced it while the bridge was stopped, preserving ownership and permissions.
+
+The idle `deploy-verification` OpenCode container needed a restart and catalog refresh before advertising Haiku. Both projects then returned the exact `HAIKU-DEFAULT-OK` response in disposable project-scoped Haiku sessions, which were removed afterwards. The location-free generate endpoint had reported model unavailable; project-scoped verification succeeded. After the config update, both channels logged ready and the bridge connected. Bridge and firewall remained active, with the existing sandbox and zero automatic restarts. Removed the temporary passwordless sudo rule and confirmed denial in a fresh SSH session. No application source changed; this check did not send a new Slack message.
