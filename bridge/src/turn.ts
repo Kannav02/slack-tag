@@ -15,6 +15,14 @@ import { refusal, store, type SlackFile } from "./attachments.ts";
 import { commandOf, control, SERVER_COMMANDS } from "./commands.ts";
 import type { Channel, Config } from "./config.ts";
 import type { Approval, Db } from "./db.ts";
+import {
+  cardText,
+  describeStep,
+  openStep,
+  setStep,
+  startProgress,
+  type Progress,
+} from "./progress.ts";
 
 const LIMIT = 3500;
 const EDIT_MS = 1000;
@@ -22,6 +30,8 @@ const EDIT_MS = 1000;
 export type SlackApi = {
   post: (channel: string, threadTs: string, text: string, blocks?: object[]) => Promise<string>;
   update: (channel: string, ts: string, text: string, blocks?: object[]) => Promise<void>;
+  remove: (channel: string, ts: string) => Promise<void>;
+  react: (channel: string, ts: string, name: string, on: boolean) => Promise<void>;
   ephemeral: (
     channel: string,
     user: string,
@@ -53,6 +63,12 @@ type Run = {
   lastEdit: number;
   timer?: NodeJS.Timeout | undefined;
   retryAt?: number;
+  // The progress card for the current execution, and the Slack message that started it.
+  progress?: Progress | undefined;
+  card?: string | undefined;
+  cardEdit: number;
+  cardTimer?: NodeJS.Timeout | undefined;
+  trigger?: string | undefined;
 };
 
 // One prompt waiting for its turn. A project runs one prompt at a time so threads never edit files concurrently.
@@ -62,11 +78,23 @@ type Job = {
   sessionId: string;
   channelId: string;
   threadTs: string;
+  messageTs: string;
   text: string;
   files: { uri: string; name: string }[];
   command?: string;
 };
 type Queue = { running?: { sessionId: string; startedAt: number } | undefined; jobs: Job[] };
+type Outcome = "done" | "failed" | "interrupted";
+const TOOL_EVENTS = new Set([
+  "permission.replied",
+  "session.tool.input.started",
+  "session.tool.called",
+  "session.tool.success",
+  "session.tool.failed",
+] as const);
+type ToolEvent = Extract<AgentEvent, { type: typeof TOOL_EVENTS extends Set<infer T> ? T : never }>;
+const isToolEvent = (event: AgentEvent): event is ToolEvent =>
+  (TOOL_EVENTS as Set<string>).has(event.type);
 
 // A started prompt may not show as active yet; only treat a missing session as finished after this long.
 const STALE_MS = 60_000;
@@ -124,6 +152,8 @@ export function createRouter(
 ) {
   const runs = new Map<string, Run>();
   const queues = new Map<string, Queue>();
+  // The Slack message each session's next execution answers, until its execution starts.
+  const triggers = new Map<string, string>();
   let chain = Promise.resolve();
   // Run bridge tasks one at a time; a failed task is logged and never stops the chain.
   const later = (task: () => Promise<unknown>) => {
@@ -147,6 +177,7 @@ export function createRouter(
       text: "",
       parts: [],
       lastEdit: 0,
+      cardEdit: 0,
     };
     runs.set(sessionId, run);
     return run;
@@ -186,6 +217,56 @@ export function createRouter(
     Object.assign(run, { text: "", parts: [], lastEdit: 0 });
   }
 
+  // The card is posted when an execution starts, so it stays above the answer messages.
+  async function startCard(run: Run) {
+    run.progress = startProgress();
+    run.trigger = triggers.get(run.sessionId);
+    triggers.delete(run.sessionId);
+    const text = cardText(run.progress);
+    run.card = await slack.post(run.channelId, run.threadTs, text, blocks(text));
+    db.addReply(run.card, run.sessionId, run.channelId);
+    run.cardEdit = Date.now();
+  }
+
+  async function paint(run: Run, force = false) {
+    if (!run.progress || !run.card) return;
+    if (!force && Date.now() - run.cardEdit < EDIT_MS) {
+      run.cardTimer ??= setTimeout(() => {
+        run.cardTimer = undefined;
+        later(() => paint(run, true));
+      }, EDIT_MS);
+      return;
+    }
+    clearTimeout(run.cardTimer);
+    run.cardTimer = undefined;
+    const text = cardText(run.progress);
+    await slack.update(run.channelId, run.card, text, blocks(text));
+    run.cardEdit = Date.now();
+  }
+
+  // A run that used no tools needs no card, so it is deleted; otherwise it becomes a summary.
+  async function endCard(run: Run, outcome: Outcome) {
+    const { progress, card, trigger } = run;
+    clearTimeout(run.cardTimer);
+    Object.assign(run, {
+      progress: undefined,
+      card: undefined,
+      cardTimer: undefined,
+      trigger: undefined,
+    });
+    if (trigger) {
+      const react = (name: string, on: boolean) =>
+        slack.react(run.channelId, trigger, name, on).catch(() => undefined);
+      await react("eyes", false);
+      await react(outcome === "done" ? "white_check_mark" : "x", true);
+    }
+    if (!progress || !card) return;
+    db.setReply(card, outcome === "done" ? "done" : "failed");
+    if (!progress.steps.length) return slack.remove(run.channelId, card);
+    const text = cardText(progress, outcome);
+    await slack.update(run.channelId, card, text, blocks(text));
+  }
+
   const queueOf = (projectDir: string) => {
     if (!queues.has(projectDir)) queues.set(projectDir, { jobs: [] });
     return queues.get(projectDir)!;
@@ -195,11 +276,15 @@ export function createRouter(
     while (!queue.running && queue.jobs.length) {
       const job = queue.jobs.shift()!;
       queue.running = { sessionId: job.sessionId, startedAt: Date.now() };
+      triggers.set(job.sessionId, job.messageTs);
+      slack.react(job.channelId, job.messageTs, "eyes", true).catch(() => undefined);
       try {
         if (job.command) await command(job.client, job.sessionId, job.command, job.text, job.files);
         else await prompt(job.client, job.sessionId, job.text, job.files);
       } catch (error) {
         queue.running = undefined;
+        triggers.delete(job.sessionId);
+        await slack.react(job.channelId, job.messageTs, "eyes", false).catch(() => undefined);
         await slack
           .post(
             job.channelId,
@@ -293,13 +378,62 @@ export function createRouter(
     }
   }
 
-  async function apply(event: AgentEvent, client: Client) {
-    if (event.type === "permission.asked") return ask(event.data, client);
-    // Succeeded, failed or interrupted: the project's next queued prompt may start.
-    if (event.type.startsWith("session.execution.")) release(event.data.sessionID);
-    const run = runOf(event.data.sessionID);
-    if (!run) return;
+  // The step behind an approval request shows as waiting until the request is answered.
+  async function waiting(run: Run | undefined, tool: string | undefined) {
+    if (!run?.progress || !tool) return;
+    setStep(run.progress, tool, "wait");
+    await paint(run);
+  }
+
+  async function end(run: Run, outcome: Outcome, note?: string) {
+    await finish(run, outcome === "done" ? "done" : "failed", note);
+    await endCard(run, outcome);
+  }
+
+  // Tool and approval events only change the progress card.
+  function track(run: Run, event: ToolEvent) {
+    const progress = run.progress;
+    if (!progress) return;
     switch (event.type) {
+      case "permission.replied":
+        setStep(progress, undefined, "run");
+        break;
+      case "session.tool.input.started":
+        openStep(progress, event.data.id, event.data.name);
+        break;
+      case "session.tool.called":
+        describeStep(
+          progress,
+          event.data.id,
+          event.data.input,
+          channels.get(run.channelId)?.channel.serverDir ?? "/",
+        );
+        break;
+      case "session.tool.success":
+      case "session.tool.failed":
+        setStep(progress, event.data.id, event.type === "session.tool.success" ? "done" : "fail");
+    }
+    return paint(run);
+  }
+
+  async function apply(event: AgentEvent, client: Client) {
+    const run = runOf(event.data.sessionID);
+    if (event.type === "permission.asked") {
+      await waiting(run, event.data.source?.id);
+      return ask(event.data, client);
+    }
+    // Succeeded, failed or interrupted: the project's next queued prompt may start.
+    if (event.type.startsWith("session.execution.") && event.type !== "session.execution.started")
+      release(event.data.sessionID);
+    if (!run) return;
+    if (isToolEvent(event)) return track(run, event);
+    switch (event.type) {
+      case "session.execution.started":
+        return startCard(run);
+      // Separate text blocks, such as a note before tool calls and the final answer, get a paragraph break.
+      case "session.text.started":
+        if (run.text) run.text = `${run.text.trimEnd()}\n\n`;
+        return;
       case "session.retry.scheduled":
         run.retryAt = event.data.at;
         return;
@@ -310,9 +444,9 @@ export function createRouter(
         run.text += event.data.delta;
         return flush(run);
       case "session.execution.succeeded":
-        return finish(run, "done");
+        return end(run, "done");
       case "session.execution.failed":
-        return finish(
+        return end(
           run,
           "failed",
           event.data.error.status === 429
@@ -320,7 +454,7 @@ export function createRouter(
             : `The run failed: ${event.data.error.message || "the agent could not complete the request."}`,
         );
       case "session.execution.interrupted":
-        return finish(run, "failed", "The run was interrupted.");
+        return end(run, "interrupted", "The run was interrupted.");
     }
   }
 
@@ -381,6 +515,7 @@ export function createRouter(
       sessionId,
       channelId: m.channelId,
       threadTs,
+      messageTs: m.ts,
       text,
       files,
       ...(cmd ? { command: cmd.name } : {}),
