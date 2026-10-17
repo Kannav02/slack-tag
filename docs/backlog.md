@@ -14,7 +14,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Done; keep updated |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
-| CMD-2 | Reduce unnecessary approvals for routine Git command batches and safe local work | High | In progress; [#40](https://github.com/Kannav02/slack-tag/issues/40), supersedes [#37](https://github.com/Kannav02/slack-tag/issues/37) |
+| CMD-2 | Reduce unnecessary approvals for routine Git command batches and safe local work | High | In progress; PR [#38](https://github.com/Kannav02/slack-tag/pull/38) for [#37](https://github.com/Kannav02/slack-tag/issues/37), then [#40](https://github.com/Kannav02/slack-tag/issues/40) for localhost `curl` and background commands |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
 | DEMO-1 | Demo features with headless browser screenshots | Medium | In progress; [#43](https://github.com/Kannav02/slack-tag/issues/43) |
 | UX-1 | Show run progress in Slack threads | Medium | Card and reactions implemented; dev Slack check pending |
