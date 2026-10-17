@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { Plugin } from "@opencode/plugin";
+import { attach, take } from "./src/attach.ts";
 import { safeDecide, stripSecrets } from "./src/policy.ts";
 import { definition, status } from "./src/rpc.ts";
 
@@ -15,6 +16,7 @@ export default Plugin.define({
   async setup(ctx) {
     await ctx.rpc.register(definition, {
       status: async () => status(),
+      attachment: async (input) => take(input as { sessionID: string; id: string }),
     });
     await ctx.permission.hook("evaluate", (input) => {
       const decision = safeDecide(input.action, input.resources);
@@ -27,6 +29,7 @@ export default Plugin.define({
       stripSecrets(input.env);
       if (agentShell) input.shell = AGENT_SHELL;
     });
+    await attach(ctx, agentShell ? AGENT_SHELL : "/bin/sh");
     // Slack threads are shared: tell the model several people may write, each message tagged by the bridge.
     await ctx.session.hook("context", (input) => {
       input.system.push({ type: "text", text: MULTIPLAYER });
