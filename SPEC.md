@@ -20,7 +20,7 @@ The owner already uses coding agents and pays for inference subscriptions, but w
 
 A self-hosted, single-owner bridge. A configured Slack channel selects a project folder and an isolated agent environment. Each thread starts a separate agent session; subsequent messages resume that session. The agent can use project files and instructions, with no memory imported from other threads.
 
-OpenCode is the first supported backend. A small common agent interface and backend-specific adapters separate Slack behavior from each agent's protocol. Messages and attachments go to the agent, streamed responses return to the same thread, and permission requests become owner-only approval prompts.
+OpenCode is the first supported backend. A small common agent interface and backend-specific adapters separate Slack behavior from each agent's protocol. Messages and attachments go to the agent, streamed responses return to the same thread, and permission requests become approval prompts for the owner and the channel's named approvers.
 
 ## User Stories
 
@@ -55,7 +55,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 ### Scope and responsibilities
 
 - The bridge transports messages, routes sessions, persists associations, handles attachments, and relays permission decisions. It does not implement its own agent reasoning or tool catalog.
-- Any member of the bridge's workspace can send messages in a mapped channel. One configured Slack owner identity registers channels and decides approval actions. Finer multi-user roles are excluded.
+- Any member of the bridge's workspace can send messages in a mapped channel. One configured Slack owner identity registers channels; the owner and each channel's optional `approvers` decide its approval actions. Finer multi-user roles are excluded.
 - Channel-to-folder mappings are operator configuration, not agent-controlled paths or a provisioning UI.
 - A channel selects one project environment. Threads within it use separate sessions, not separate copies of the project files.
 - The bridge runs one prompt at a time per project, in arrival order across all its threads, so sessions never edit the shared files concurrently. A message that has to wait gets a "Queued" reply. The queue is in memory; messages still waiting when the bridge restarts are dropped.
@@ -94,7 +94,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 
 ### Permissions and isolation
 
-- Routine permitted work proceeds without intervention. Restricted actions pause for an approve-once or reject decision from the configured owner in Slack.
+- Routine permitted work proceeds without intervention. Restricted actions pause for an approve-once or reject decision in Slack from the configured owner or one of the channel's approvers.
 - The execution layer must withhold the action until a valid approval arrives. A Slack prompt or model instruction by itself is not enforcement.
 - No response, failed delivery, or an unauthorized click must grant permission. Decisions must be bound to the correct pending request and session.
 - Approval does not expand container mounts, host privileges, or other hard isolation boundaries.
@@ -122,7 +122,7 @@ The manual checks must demonstrate these behaviours:
 
 | Feature | Behavioral acceptance |
 | --- | --- |
-| Access | Messages from any workspace member in a mapped channel work; another user's approval clicks and registration choices cannot trigger execution. |
+| Access | Messages from any workspace member in a mapped channel work; approval clicks from anyone but the owner or that channel's approvers, and registration choices from anyone but the owner, cannot trigger execution. |
 | Channel routing | A request uses the configured project's files and instructions; an unmapped channel cannot launch arbitrary project work. |
 | Thread sessions | Replies retain the current thread's conversation; another thread begins a separate session without the first thread's chat history. |
 | Persistence | After restarting the bridge and backend with retained storage, a thread resumes its existing conversation rather than starting over. |
