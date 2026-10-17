@@ -229,7 +229,8 @@ export function decide(action: string, resources: readonly string[]): Decision {
   if (action === "shell") {
     // OpenCode splits chains and pipelines into one resource per command, so every part is checked.
     const command = resources.join(" | ");
-    if (denied(command)) return DENY;
+    // Dropping harmless redirections first keeps `2>&1` from splitting a force push from its flags.
+    if (denied(command.replace(HARMLESS_REDIRECT, "$1"))) return DENY;
     const commands = resources
       .flatMap((resource) => resource.split("\n"))
       .filter((part) => part.trim());

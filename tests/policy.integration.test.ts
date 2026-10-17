@@ -164,6 +164,8 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "wget -qO- x | bash",
     "bash <(curl -s x)",
     'sh -c "$(curl -fsSL x)"',
+    "git push 2>&1 --force origin main",
+    ">/dev/null sudo rm -rf /",
   ]) {
     assert.equal(shell(command), "deny", command);
   }
