@@ -144,6 +144,14 @@ One channel maps to one project and one server; each thread is one session on it
 | `deploy/firewall.sh` drops traffic from `st-*` networks to the cloud metadata range `169.254.0.0/16` and to the host itself; replies to the bridge's own connections still pass. | **Real** (SEC-5, Docker-in-Docker) |
 | Other internet access stays open by decision (no egress allowlist). | By design (SEC-5, 2026-10-02) |
 
+### Agent → browser (screenshots)
+
+| Control | Status |
+| --- | --- |
+| `playwright screenshot` runs without approval only for an `http(s)://` URL on `localhost`, `127.0.0.1` or `[::1]`, with `--full-page`, `--viewport-size=`, `--wait-for-selector=`, `--wait-for-timeout=` or `--timeout=`, saving a `.png` under `/tmp` or the working folder (no `..` or dot folders). Other hosts, `file://`, other flags (`--save-har`, `--user-data-dir`, `--channel`, `-b`), other subcommands, `npx` or a path to another binary ask. The agent is told to use `/tmp` so screenshots are not committed. | **Tested**; **Real** (OpenCode 2.0.15 with the plugin and a scripted model) |
+| The browser is the image's root-owned Chromium headless shell, started through `agent-shell` as uid 1001 with no capabilities, so it reads and writes only what the agent can. Playwright runs it with `--no-sandbox` and `--disable-dev-shm-usage` (shared memory in the `/tmp` tmpfs); no capability, seccomp or `/dev/shm` change. | **Real** (runc, stand-in image with the compose flags); gVisor and the built image **Configured** |
+| The localhost check is not an egress boundary: a local page can load other sites, and the CLI opens a local file named like the URL as `file://` instead. Neither gives more than project code run by `npm test` already has. | By design (egress open, SEC-5) |
+
 ## Secrets inventory
 
 | Secret | Stored in | Who can read it |
