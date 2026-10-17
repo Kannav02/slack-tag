@@ -14,10 +14,19 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Done; keep updated |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
-| CMD-2 | Reduce unnecessary approvals for routine Git command batches | High | Deferred; [#37](https://github.com/Kannav02/slack-tag/issues/37) |
+| CMD-2 | Reduce unnecessary approvals for routine Git command batches and safe local work | High | In progress; [#40](https://github.com/Kannav02/slack-tag/issues/40), supersedes [#37](https://github.com/Kannav02/slack-tag/issues/37) |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
-| DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
+| DEMO-1 | Demo features with headless browser screenshots | Medium | In progress; [#43](https://github.com/Kannav02/slack-tag/issues/43) |
 | UX-1 | Show run progress in Slack threads | Medium | Card and reactions implemented; dev Slack check pending |
+| PAR-1 | Each Slack thread works in its own Git worktree and branch | High | In progress; [#39](https://github.com/Kannav02/slack-tag/issues/39) |
+| TEAM-1 | Per-channel approvers | High | In progress; [#41](https://github.com/Kannav02/slack-tag/issues/41) |
+| OUT-1 | The agent sends files to its Slack thread | High | In progress; [#42](https://github.com/Kannav02/slack-tag/issues/42) |
+| GIT-1 | Open a pull request at the end of every task | High | In progress; [#44](https://github.com/Kannav02/slack-tag/issues/44) |
+| CMD-3 | `/fix`: reproduce, fix and prove with evidence | Medium | Planned after OUT-1 and GIT-1; [#45](https://github.com/Kannav02/slack-tag/issues/45) |
+
+## Daily-driver direction (2026-10-17)
+
+The owner wants Slack Tag to replace terminal agents for daily work shared with teammates. Decisions: every task that changes files ends in a pull request; each Slack thread works in its own Git worktree and branch; named teammates may approve actions per channel; routine local commands for reproducing and checking problems run without approval; and the agent proves its work with files, command logs and screenshots posted to the thread. Each item above has a GitHub issue with scope and acceptance criteria and lands as its own PR. The rows for PAR-1, TEAM-1, OUT-1, GIT-1, CMD-2 and DEMO-1 change state as their PRs merge.
 
 ## Current behavior
 
