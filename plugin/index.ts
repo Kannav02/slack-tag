@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { Plugin } from "@opencode/plugin";
 import { attach, take } from "./src/attach.ts";
+import { fix } from "./src/fix.ts";
 import { fastForwardPulls, safeDecide, stripSecrets } from "./src/policy.ts";
 import { pullRequestTool } from "./src/pull-request.ts";
 import { definition, status } from "./src/rpc.ts";
@@ -43,6 +44,7 @@ export default Plugin.define({
       if (agentShell) input.shell = AGENT_SHELL;
     });
     await attach(ctx, agentShell ? AGENT_SHELL : "/bin/sh");
+    await fix(ctx);
     // Slack threads are shared: tell the model several people may write, each message tagged by the bridge.
     await ctx.session.hook("context", (input) => {
       input.system.push({ type: "text", text: MULTIPLAYER });
