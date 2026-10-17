@@ -79,7 +79,10 @@ async function harness(t: TestContext) {
   ];
   // OpenCode answers its first model lists with an empty catalog while it is still loading.
   const catalog = { emptyLists: 0 };
-  const slackErrors = { updateTs: "" };
+  const slackErrors = { updateTs: "", upload: false };
+  // Files the plugin RPC hands out, by "<session>/<id>", and every fetch and upload request.
+  const attachments: Record<string, Record<string, string>> = {};
+  const uploads: Record<string, unknown>[] = [];
   const unexpected: string[] = [];
   const replies: Record<string, unknown>[] = [];
   const reactions: string[] = [];
@@ -127,6 +130,18 @@ async function harness(t: TestContext) {
     if (path === "/files/note.txt") return res.end("uploaded note");
     if (path === "/api/rpc/slack-tag/status")
       return json({ output: { pluginVersion: "test", policyVersion: 3 } });
+    if (path === "/api/rpc/slack-tag/attachment") {
+      const { input } = z.object({ input: z.record(z.string(), z.string()) }).parse(args);
+      uploads.push({ path, ...input });
+      return json({ output: attachments[`${input.sessionID}/${input.id}`] ?? {} });
+    }
+    // Slack's external upload flow: get an upload URL, send the bytes there, complete in the thread.
+    if (/^\/(upload\/F1|api\/files\.(getUploadURLExternal|completeUploadExternal))$/.test(path)) {
+      uploads.push({ path, raw, ...anyCall.parse(args) });
+      if (path === "/upload/F1") return res.end("OK");
+      if (slackErrors.upload) return json({ ok: false, error: "missing_scope" });
+      return json({ ok: true, upload_url: `${base}/upload/F1`, file_id: "F1", files: [] });
+    }
     if (path === "/api/model") {
       if (catalog.emptyLists > 0) {
         catalog.emptyLists--;
@@ -397,6 +412,8 @@ async function harness(t: TestContext) {
     fetched,
     catalog,
     slackErrors,
+    attachments,
+    uploads,
     unexpected,
     logs: () => logs,
     until,
@@ -1087,3 +1104,49 @@ await test(
     }
   },
 );
+
+await test("slack_attach files reach the thread redacted; a failed upload only posts a note", async (t) => {
+  const h = await harness(t);
+  h.send({ ts: "500.1" });
+  await h.until(() => h.prompts.length === 1);
+  const sessionID = h.sessions[0]?.id ?? "";
+  const tool = (type: string, session: string, data: object) =>
+    h.emit(`session.tool.${type}`, session, undefined, { sessionID: session, id: "c1", ...data });
+  const log = "tests passed\npw-synthetic-secret xoxb-synthetic-secret\n";
+  const caption = "Log for <!channel> pw-synthetic-secret";
+  const data = Buffer.from(log).toString("base64");
+  h.attachments[`${sessionID}/a1`] = { name: "test.log", data, caption };
+  h.emit("session.execution.started", sessionID);
+  tool("input.started", sessionID, { name: "slack_attach" });
+  tool("called", sessionID, { input: { path: "/project/out/test.log", caption } });
+  tool("success", sessionID, { metadata: { slackAttach: "a1" } });
+  await h.until(() => h.uploads.some((u) => u.path === "/api/files.completeUploadExternal"));
+  const [fetch, url, upload, done] = h.uploads;
+  assert.deepEqual(fetch, { path: "/api/rpc/slack-tag/attachment", sessionID, id: "a1" });
+  const redacted = "tests passed\n[redacted] [redacted]\n";
+  assert.deepEqual([url?.filename, url?.length], ["test.log", String(redacted.length)]);
+  assert.ok(String(upload?.raw).includes(redacted));
+  assert.deepEqual([done?.channel_id, done?.thread_ts], ["CTEST", "500.1"]);
+  assert.equal(done?.initial_comment, "Log for @\u200bchannel [redacted]");
+  assert.ok(!JSON.stringify(h.uploads).includes("synthetic-secret"));
+
+  // A subagent's file goes to its parent's thread. Neither Slack refusing the upload nor an
+  // expired attachment stops the run: each posts a note.
+  h.slackErrors.upload = true;
+  const png = Buffer.from("89504e470d0a1a0a", "hex").toString("base64");
+  h.attachments["ses_child/a2"] = { name: "shot.png", data: png };
+  tool("success", "ses_child", { metadata: { slackAttach: "a2" } });
+  tool("success", sessionID, { metadata: { slackAttach: "expired" } });
+  const notes = () => h.messages.filter((m) => /could not be attached/.test(m.text ?? ""));
+  await h.until(() => notes().length === 2);
+  assert.ok(notes().every((m) => m.thread_ts === "500.1"));
+  assert.ok(h.uploads.some((u) => u.filename === "shot.png"));
+  assert.match(h.logs(), /missing_scope[^]*expired or was already sent/);
+  h.emit("session.text.delta", sessionID, "Here it is.");
+  h.emit("session.execution.succeeded", sessionID);
+  const card = () => h.messages.findLast((m) => m.text?.startsWith("*✓ Done*"))?.text ?? "";
+  await h.until(card);
+  assert.match(card(), /\n✓ Attached `out\/test\.log`$/);
+  assert.ok(h.reactions.includes("+white_check_mark@500.1"));
+  assert.deepEqual(h.unexpected, []);
+});
