@@ -6,10 +6,10 @@ type Prompt = Parameters<Plugin.Context["session"]["prompt"]>[0];
 const template = (problem: string) => `Fix this problem: ${problem}
 
 Work in this order:
-1. Reproduce it before changing anything. Run the test, script or command that shows the problem and save its output, for example \`npm test > /tmp/fix-before.log 2>&1\`. For a page, save a screenshot with \`playwright screenshot <url> /tmp/fix-before.png\`.
+1. Reproduce it before changing anything: run the test, script or command that shows the problem. Don't redirect its output to a file; Slack gets every command's output. For a page, save a screenshot with \`playwright screenshot <url> /tmp/fix-before.png\`.
 2. Fix it with the smallest change that works.
-3. Run the same checks again and save the output to /tmp/fix-after.log (or /tmp/fix-after.png).
-4. Post the before and after files with slack_attach.
+3. Run the same checks again (for a page, save /tmp/fix-after.png).
+4. Post any screenshots with slack_attach.
 5. Switch to a new branch named jeff/<short-slug>, commit the fix and push it. If the open_pull_request tool is available, call it.
 6. End your reply with exactly these four sections:
 **What changed:** one or two sentences.
