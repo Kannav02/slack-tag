@@ -50,7 +50,7 @@ flowchart LR
 | Credentials `/etc/slack-tag` | root, files `0600`; systemd reads `bridge.env` before dropping to `slack-tag` | `bridge.env` (Slack tokens, one password per hand-made channel), `<project>.env` (that server's password), `proxy.env` (model key). |
 | OpenCode container | Starts as root, `start-server` drops the server to `node` (uid 1000); `agent-shell` runs agent shells as `agent` (uid 1001). gVisor (`runsc`) by default. | `opencode serve` with the project at `/project`, uploads at `/inbox` (read-only) and its own `/data` volume. Hand-made channels use `deploy/compose.yaml`; registered ones use `deploy/project.yaml`. |
 | key-proxy container | uid 1000, read-only, no capabilities | Swaps the placeholder key for the real model key and forwards only to `https://opencode.ai/zen/go/v1`. One per registered project; one shared by hand-made projects. |
-| Safety plugin (`plugin/`) | Inside the server process | Decides permission requests (policy version 3), strips secrets from agent shells, reports its policy version over RPC, and provides the `slack_attach` tool, whose files the bridge fetches over RPC. |
+| Safety plugin (`plugin/`) | Inside the server process | Decides permission requests (policy version 3), strips secrets from agent shells, reports its policy version over RPC, and provides the `slack_attach` tool, whose files the bridge fetches over RPC, and the `/fix` command. |
 | git-proxy container (optional) | uid 1000, read-only, no capabilities | Holds the host GitHub token; forwards one repository's Git traffic and, when enabled, its pull request calls. See [Git proxy](git-proxy.md). |
 | Host firewall (`deploy/firewall.sh`) | root, `slack-tag-firewall.service` | Drops traffic from `st-*` bridges to `169.254.0.0/16` and to the host itself. |
 
@@ -77,6 +77,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Only the owner can register a project. Approval buttons accept the owner and the users in that channel's `approvers`; anyone else, including another channel's approvers, gets a private refusal and the request stays pending. | **Tested**, **Live** for the owner path |
 | Approval button values are parsed defensively and must come from the thread where the bridge asked; malformed or misplaced clicks are ignored. | **Tested** (SEC-3) |
 | The bot token is sent only to `https://files.slack.com`; redirects to any other origin are refused. | **Tested** (SEC-3) |
+| `/init`, `/review` or `/fix` arguments containing `` !`…` `` are sent as an ordinary prompt: a config or project command template of the same name shadows OpenCode's or the plugin's command, and runs `` !`…` `` in its arguments as a shell command on the server without asking. | **Tested** (bridge); shadowing and interpolation **Real** for `fix` and `review` |
 
 ### Bridge → Slack (output)
 
@@ -86,6 +87,7 @@ One channel maps to one project and one server; each thread is one session on it
 | `<!channel>`, `<!here>`, `@everyone` and similar in agent output are neutralised. | **Tested** (SEC-3); how real Slack renders them is not verified |
 | Failures post a generic message; details go to the bridge log. Registration still shows the last 500 characters of a failed step's error. | **Tested** |
 | Files the agent posts with `slack_attach` go to its session's thread (a subagent's to its nearest mapped ancestor's) through Slack's external upload; the Slack SDK also sends the bot token to the upload URL Slack's API returns. Text files and captions get the same redaction; images cannot be redacted. A failed upload or an expired file posts a short note, and the run continues. | **Tested**; needs the `files:write` scope, not checked in real Slack |
+| During a `/fix` run, the bridge keeps in memory the shell calls OpenCode reports for that run's own session (not its subagents): command, exit code or error, and the last 2000 characters of output, for at most the last 200 calls. When the run succeeds, fails or is interrupted, it uploads them as `fix-commands.log` with the same redaction as other text files. Unlike the progress card, it shows command text and output, so a secret the bridge does not know, such as a printed `.env` value, is not redacted. It shows what ran, not whether a check was meaningful. | **Tested**; event shapes **Real** (`spike/v2/attach.sh fix-check.mjs`); not checked in real Slack |
 
 ### Bridge → OpenCode server
 
