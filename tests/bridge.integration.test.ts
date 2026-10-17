@@ -1255,3 +1255,88 @@ await test("approvers that are not Slack user IDs stop startup", { timeout: 20_0
     assert.match(await errors, /channel CA approvers must be a list of Slack user IDs/);
   }
 });
+
+await test("/fix runs the plugin's command and uploads the shell commands its own session ran", async (t) => {
+  const h = await harness(t);
+  h.send({ ts: "600.1", text: "<@UBOT> /fix the login test fails" });
+  await h.until(() => h.calls.length === 1);
+  const sessionID = h.sessions[0]?.id ?? "";
+  assert.deepEqual(h.calls[0], {
+    type: "command",
+    sessionID,
+    name: "fix",
+    text: "the login test fails",
+    files: [],
+    delivery: "queue",
+  });
+  // Shapes from real OpenCode 2.0.15 (spike/v2/fix-check.mjs): a non-zero exit is a success with an exit code.
+  const tool = (session: string, id: string, type: string, data: object) =>
+    h.emit(`session.tool.${type}`, session, undefined, { sessionID: session, id, ...data });
+  const shell = (session: string, id: string, command: string) => {
+    tool(session, id, "input.started", { name: "shell" });
+    tool(session, id, "called", { input: { command } });
+  };
+  const exit = (code: number, ...text: string[]) => ({
+    content: text.map((part) => ({ type: "text", text: part })),
+    metadata: { status: "completed", truncated: false, exit: code },
+  });
+  h.emit("session.execution.started", sessionID);
+  shell(sessionID, "c1", "npm test");
+  tool(sessionID, "c1", "success", exit(1, "FAIL login\n", "Exited with code 1"));
+  tool(sessionID, "c2", "input.started", { name: "read" });
+  tool(sessionID, "c2", "called", { input: { path: "/project/src/login.ts" } });
+  shell("ses_child", "c3", "echo from a subagent");
+  shell(sessionID, "c4", "echo pw-synthetic-secret");
+  tool(sessionID, "c4", "success", exit(0, "xoxb-synthetic-secret\n"));
+  shell(sessionID, "c5", "sudo true");
+  tool(sessionID, "c5", "failed", {
+    error: { type: "permission.rejected", message: "Blocked by the safety plugin" },
+  });
+  shell(sessionID, "c6", "npm test");
+  h.emit("session.execution.interrupted", sessionID);
+  await h.until(() => h.uploads.some((u) => u.path === "/api/files.completeUploadExternal"));
+  const [url, upload, done] = h.uploads;
+  const log = [
+    "Shell commands of this /fix run, recorded by the bridge from OpenCode's tool events, not from " +
+      "the model's reply. Each shows its result and the end of its output.",
+    "$ npm test\n[exit 1]\nFAIL login\nExited with code 1",
+    "$ echo [redacted]\n[exit 0]\n[redacted]",
+    "$ sudo true\n[failed: Blocked by the safety plugin]",
+    "$ npm test\n[no result before the run ended]\n",
+  ].join("\n\n");
+  assert.deepEqual([url?.filename, url?.length], ["fix-commands.log", String(log.length)]);
+  assert.ok(String(upload?.raw).includes(log));
+  assert.deepEqual(
+    [done?.channel_id, done?.thread_ts, done?.initial_comment],
+    ["CTEST", "600.1", "Commands Jeff ran for /fix"],
+  );
+
+  // A /fix run without shell commands, then a plain prompt in the same session, upload nothing.
+  h.send({ ts: "600.2", thread_ts: "600.1", text: "<@UBOT> /fix" });
+  await h.until(() => h.calls.length === 2);
+  assert.deepEqual([h.calls[1]?.name, h.calls[1]?.text], ["fix", ""]);
+  h.emit("session.execution.started", sessionID);
+  tool(sessionID, "c7", "input.started", { name: "read" });
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.reactions.includes("+white_check_mark@600.2"));
+  h.send({ ts: "600.3", thread_ts: "600.1", text: "run the tests" });
+  await h.until(() => h.prompts.length === 1);
+  h.emit("session.execution.started", sessionID);
+  shell(sessionID, "c8", "npm test");
+  tool(sessionID, "c8", "success", exit(0, "ok\n"));
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.reactions.includes("+white_check_mark@600.3"));
+  assert.equal(h.uploads.length, 3);
+
+  // The log keeps the last 200 commands and the end of each output.
+  h.send({ ts: "600.4", thread_ts: "600.1", text: "<@UBOT> /fix the build" });
+  await h.until(() => h.calls.length === 3);
+  for (let i = 0; i <= 200; i++) shell(sessionID, `d${i}`, `echo ${i}`);
+  tool(sessionID, "d200", "success", exit(0, `start ${"x".repeat(3000)} end`));
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.uploads.length === 6);
+  const capped = String(h.uploads[4]?.raw);
+  assert.ok(capped.includes("(Earlier commands not shown: 1.)\n\n$ echo 1\n"));
+  assert.ok(capped.includes(`\n\n$ echo 200\n[exit 0]\n…${"x".repeat(1996)} end\n`));
+  assert.deepEqual(h.unexpected, []);
+});

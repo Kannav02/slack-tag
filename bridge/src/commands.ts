@@ -11,8 +11,8 @@ import type { Channel } from "./config.ts";
 
 export type Command = { name: string; args: string };
 
-// `init` and `review` run as OpenCode server commands; the others are handled by the bridge.
-export const SERVER_COMMANDS = new Set(["init", "review"]);
+// `init`, `review` and the safety plugin's `fix` run as OpenCode server commands; the bridge handles the rest.
+export const SERVER_COMMANDS = new Set(["init", "review", "fix"]);
 const NAMES = new Set([...SERVER_COMMANDS, "model", "stop", "compact"]);
 const NO_SESSION = "No session in this thread yet. Mention OpenCode with a request first.";
 const LOADING = "OpenCode's model list is still loading. Try `/model` again in a moment.";
