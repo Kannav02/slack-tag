@@ -57,7 +57,7 @@ One channel maps to one project and one server; each thread is one session on it
 
 ## Trust zones
 
-1. **Owner and members**: workspace members may prompt mapped projects and run Slack commands; only the owner (`ownerUserId`) may register projects and approve actions.
+1. **Owner, approvers and members**: workspace members may prompt mapped projects and run Slack commands; only the owner (`ownerUserId`) may register projects; the owner and a channel's `approvers` may approve or reject actions in that channel.
 2. **Slack**: delivers events and file URLs. Trusted to say who sent a message.
 3. **Bridge host**: the bridge, its state and credentials, Docker. Fully trusted.
 4. **OpenCode server**: holds its own server password; trusted to enforce the plugin's decisions.
@@ -73,7 +73,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Workspace members' messages can start or continue sessions in mapped channels. | **Tested**, **Live** for the owner path; two-user live test pending |
 | Member replies in a mapped thread continue without a mention. | **Tested**, **Live** for the owner path |
 | The bridge reads its workspace from `auth.test` and ignores events, approval clicks and folder choices from any other workspace. | **Tested** (SEC-3) |
-| Only the owner can register a project or click approval buttons. | **Tested**, **Live** for the owner path |
+| Only the owner can register a project. Approval buttons accept the owner and the users in that channel's `approvers`; anyone else, including another channel's approvers, gets a private refusal and the request stays pending. | **Tested**, **Live** for the owner path |
 | Approval button values are parsed defensively and must come from the thread where the bridge asked; malformed or misplaced clicks are ignored. | **Tested** (SEC-3) |
 | The bot token is sent only to `https://files.slack.com`; redirects to any other origin are refused. | **Tested** (SEC-3) |
 
