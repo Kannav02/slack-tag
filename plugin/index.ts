@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { Plugin } from "@opencode/plugin";
 import { safeDecide, stripSecrets } from "./src/policy.ts";
+import { pullRequestTool } from "./src/pull-request.ts";
 import { definition, status } from "./src/rpc.ts";
 
 const AGENT_SHELL = "/usr/local/bin/agent-shell";
@@ -8,7 +9,9 @@ const MULTIPLAYER =
   "You are in a multiplayer session in a shared Slack thread. Several people may send messages, " +
   "and each message starts with its sender's Slack mention, such as <@U123>:. Keep track of who " +
   "asked for what, address people by their mention when it helps, and do not assume that one " +
-  "person agrees with another's request.";
+  "person agrees with another's request. Work on a jeff/<slug> branch and never commit to the " +
+  "default branch. At the end of any task that changes files, commit, push the branch, call " +
+  "open_pull_request and share the pull request link.";
 
 export default Plugin.define({
   id: "slack-tag",
@@ -16,6 +19,8 @@ export default Plugin.define({
     await ctx.rpc.register(definition, {
       status: async () => status(),
     });
+    // Plugin tools never reach the permission hook, so opening a pull request asks no one.
+    await ctx.tool.transform((tools) => tools.add(pullRequestTool(ctx.session)));
     await ctx.permission.hook("evaluate", (input) => {
       const decision = safeDecide(input.action, input.resources);
       input.effect = decision.effect;
