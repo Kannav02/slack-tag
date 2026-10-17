@@ -8,7 +8,7 @@ const local = (port, path) => `http://127.0.0.1:${port}${path}`
 const models = local(process.env.MOCK_PORT, "/v1/models")
 const cases = [
   ["allow", "npm run dev &"],
-  ["allow", `npm run dev >/dev/null 2>&1 & curl -sSf ${models} | head -c 60`],
+  ["allow", `npm run dev >/dev/null 2>&1 & sleep 1; curl -sSf ${models} | head -c 60`],
   ["allow", `curl -s ${models}`],
   ["allow", `curl -si ${local(process.env.PLUGIN_PORT, "/api/session")}`],
   ["ask", "npm run dev & rm -rf src"],

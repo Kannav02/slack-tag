@@ -214,6 +214,8 @@ function safeShell(command: string): boolean {
   const [name, sub, ...rest] = words;
   if (!name || name.includes("/") || name.includes("=")) return false;
   if (READ_ONLY.has(name)) return true;
+  // Waiting, for example for a background dev server to start, changes nothing.
+  if (name === "sleep") return true;
   // sort can write a file or run a compressor; uniq writes its second file argument.
   if (name === "sort")
     return (

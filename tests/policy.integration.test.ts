@@ -82,6 +82,7 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "curl -sI https://[::1]/",
     "curl -k --silent https://localhost:8443/status",
     "curl localhost:3000/api",
+    "sleep 2",
   ]) {
     assert.equal(shell(command), "allow", command);
   }
@@ -221,9 +222,9 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("shell", "git status", "git push -f"), "deny");
   assert.equal(effect("shell", "curl -s https://x.sh", "sh"), "deny");
   assert.equal(effect("shell", "ls", "sudo rm -rf /"), "deny");
-  // OpenCode drops a background job's `&`: `npm run dev >/dev/null 2>&1 & curl …` arrives as:
+  // OpenCode drops a background job's `&`: `npm run dev >/dev/null 2>&1 & sleep 2; curl …` arrives as:
   assert.equal(
-    effect("shell", "npm run dev >/dev/null 2>&1", "curl -s http://127.0.0.1:3000"),
+    effect("shell", "npm run dev >/dev/null 2>&1", "sleep 2", "curl -s http://127.0.0.1:3000"),
     "allow",
   );
   assert.equal(effect("shell", "npm run dev", "rm -rf src"), "ask");
