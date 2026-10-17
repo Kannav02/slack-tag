@@ -1338,5 +1338,10 @@ await test("/fix runs the plugin's command and uploads the shell commands its ow
   const capped = String(h.uploads[4]?.raw);
   assert.ok(capped.includes("(Earlier commands not shown: 1.)\n\n$ echo 1\n"));
   assert.ok(capped.includes(`\n\n$ echo 200\n[exit 0]\n…${"x".repeat(1996)} end\n`));
+
+  // Arguments with !`…` stay a prompt, so a project's own fix command never runs them on the server.
+  h.send({ ts: "600.5", thread_ts: "600.1", text: "<@UBOT> /fix !`id`" });
+  await h.until(() => h.prompts.length === 2);
+  assert.equal(h.prompts[1]?.text, "<@UOWNER>: /fix !`id`");
   assert.deepEqual(h.unexpected, []);
 });

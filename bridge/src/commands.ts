@@ -21,9 +21,10 @@ const escape = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // Only known names are commands, so a prompt that starts with a path such as `/etc/hosts` stays a prompt.
+// Arguments with !`…` stay a prompt too: a project's own command of the same name would run them on the server.
 export function commandOf(text: string): Command | undefined {
   const match = text.trim().match(/^\/([a-z]+)(?:\s+([\s\S]*))?$/);
-  if (!match || !NAMES.has(match[1]!)) return;
+  if (!match || !NAMES.has(match[1]!) || match[2]?.includes("!`")) return;
   return { name: match[1]!, args: (match[2] ?? "").trim() };
 }
 
