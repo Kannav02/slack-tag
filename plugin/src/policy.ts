@@ -36,7 +36,7 @@ const GIT_VALUE_OPTIONS = new Set([
 
 const READ_ONLY = new Set(["ls", "cat", "head", "tail", "wc", "pwd", "echo", "grep", "cut", "tr"]);
 // Merging or discarding output cannot write a file, and `$?` always expands to a number.
-const HARMLESS_REDIRECT = /(^|\s)([12]?>&[12]|[12&]?>>?\s*\/dev\/null|<\s*\/dev\/null)(?=\s|$)/g;
+const HARMLESS_REDIRECT = /(^|\s)([12]?>&[12]|[12]?>>?\s*\/dev\/null|<\s*\/dev\/null)(?=\s|$)/g;
 const GIT_SAFE = new Set([
   "status",
   "log",

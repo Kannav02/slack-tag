@@ -105,6 +105,8 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "git log > out.txt 2>&1",
     "git log 2>err.txt",
     "cat a &>file",
+    "ls &>/dev/null",
+    "ls &>/dev/null rm -rf src",
     "echo $HOME",
     "sort -o out.txt in.txt",
     "sort -ro out.txt in.txt",
