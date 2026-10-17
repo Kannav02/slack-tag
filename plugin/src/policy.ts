@@ -17,6 +17,10 @@ const COMPOUND = /[;&|<>`\r\\$(){}]/;
 const DOWNLOAD = /\b(curl|wget)\b/;
 const RUNS_DOWNLOAD =
   /\|\s*(sudo\s+)?(\S*\/)?(ba|z|da|k)?sh\b|\|\s*(\S*\/)?(python3?|node|perl|ruby|eval|source)\b|<\(\s*(curl|wget)\b|\$\(\s*(curl|wget)\b|`\s*(curl|wget)\b/;
+// curl may only fetch from the agent's own server, without flags that touch files, send data or
+// change the target (redirects, proxies, sockets, resolving).
+const LOCAL_URL = /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/[^\s@]*)?$/;
+const CURL_FLAG = /^(-[sSfiIvk]+|--(silent|show-error|fail|include|head|verbose|insecure))$/;
 const ESCALATE = new Set(["sudo", "su", "doas"]);
 const WRAPPERS = new Set(["env", "command", "exec", "nohup", "time", "nice", "xargs", "builtin"]);
 // git options that take a separate value before the subcommand.
@@ -222,7 +226,16 @@ function safeShell(command: string): boolean {
   if (name === "pytest" || name === "make" || name === "tsc") return true;
   if (name === "node") return sub === "--test";
   if (PACKAGE_MANAGERS.has(name)) return PACKAGE_SAFE.has(sub ?? "");
+  // `$?` is checked as 0 above, so it must not reach a curl address.
+  if (name === "curl") return !command.includes("$") && safeCurl(words.slice(1));
   return name === "git" && safeGit(sub ?? "", rest);
+}
+
+function safeCurl(args: string[]): boolean {
+  return (
+    args.some((arg) => LOCAL_URL.test(arg)) &&
+    args.every((arg) => LOCAL_URL.test(arg) || CURL_FLAG.test(arg))
+  );
 }
 
 export function decide(action: string, resources: readonly string[]): Decision {
