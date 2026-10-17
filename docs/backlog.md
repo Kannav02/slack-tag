@@ -130,7 +130,7 @@ Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that
 
 - **Browser:** a headless Chromium sidecar container per project on the project's own network, following the per-project key-proxy pattern, so the OpenCode image stays small and the browser is separate from the project files. The alternative is Playwright plus Chromium inside the OpenCode image: simpler, but it adds about 400 MB, and Chromium needs `--no-sandbox` and more shared memory in a read-only container.
 - **Agent tools:** Playwright MCP (`@playwright/mcp`) configured in OpenCode and connected to the sidecar over CDP, giving the agent navigate, click, type and screenshot tools.
-- **Output:** the agent writes images to `.slack-tag/outbox/<thread>/`. The bridge, which already holds the Slack token, uploads new files to the thread. The agent receives no Slack or GitHub token; `git push` stays blocked.
+- **Output:** the agent saves screenshots under `/tmp` and posts them with the `slack_attach` tool ([#42](https://github.com/Kannav02/slack-tag/issues/42)): the plugin reads each file as the agent user and the bridge, which holds the Slack token, uploads it to the thread. The agent receives no Slack or GitHub token.
 - **PRs (later):** a token-holding component outside the agent (the bridge or a proxy) attaches images to the PR, for example by committing them to a `pr-assets` branch and linking them in the description, using a token scoped to the repo.
 
 Open questions:
