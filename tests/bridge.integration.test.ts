@@ -58,8 +58,13 @@ function portOf(server: Server) {
 }
 
 // Start the production process, replace only external services, and inspect messages plus persisted state.
-async function harness(t: TestContext) {
+async function harness(
+  t: TestContext,
+  opts: { worktrees?: boolean; legacy?: { thread_ts: string; session_id: string }[] } = {},
+) {
   const work = await mkdtemp(join(tmpdir(), "slack-tag-integration-"));
+  const worktreeSlugs: string[] = [];
+  const worktree = { fails: false };
   const messages: Message[] = [];
   const sessions: (z.infer<typeof sessionCall> & { id: string })[] = [];
   const prompts: (z.infer<typeof promptCall> & { sessionID: string | undefined })[] = [];
@@ -127,6 +132,12 @@ async function harness(t: TestContext) {
     if (path === "/files/note.txt") return res.end("uploaded note");
     if (path === "/api/rpc/slack-tag/status")
       return json({ output: { pluginVersion: "test", policyVersion: 3 } });
+    if (path === "/api/rpc/slack-tag/worktree") {
+      const slug = (args as { input?: { slug?: string } }).input?.slug ?? "";
+      worktreeSlugs.push(slug);
+      // worktree.fails simulates a server that cannot create one safely (project config not disabled).
+      return json({ output: worktree.fails ? {} : { directory: `/worktrees/${slug}` } });
+    }
     if (path === "/api/model") {
       if (catalog.emptyLists > 0) {
         catalog.emptyLists--;
@@ -375,10 +386,24 @@ async function harness(t: TestContext) {
           opencodeUrl: base,
           passwordEnv: "TEST_SERVER_PASSWORD",
           model: "test/test",
+          ...(opts.worktrees ? { worktrees: true } : {}),
         },
       },
     }),
   );
+  // Seed thread→session rows mapped before per-thread worktrees: the pre-migration schema has no
+  // directory column, so these keep the shared /project checkout.
+  if (opts.legacy?.length) {
+    const seed = new DatabaseSync(join(state, "slack-tag.sqlite"));
+    seed.exec(
+      "CREATE TABLE threads (team_id TEXT NOT NULL, channel_id TEXT NOT NULL, thread_ts TEXT NOT NULL, session_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (team_id, channel_id, thread_ts))",
+    );
+    for (const row of opts.legacy)
+      seed
+        .prepare("INSERT INTO threads VALUES ('TTEST', 'CTEST', ?, ?, '2026-01-01')")
+        .run(row.thread_ts, row.session_id);
+    seed.close();
+  }
   await start();
   const db = new DatabaseSync(join(state, "slack-tag.sqlite"), { readOnly: true });
   t.after(() => db.close());
@@ -388,6 +413,8 @@ async function harness(t: TestContext) {
     outside,
     base,
     db,
+    worktreeSlugs,
+    worktree,
     messages,
     sessions,
     prompts,
@@ -1087,3 +1114,73 @@ await test(
     }
   },
 );
+
+await test(
+  "worktree-enabled channel: new threads get their own jeff/<slug> worktree and run concurrently",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t, {
+      worktrees: true,
+      legacy: [
+        { thread_ts: "900.1", session_id: "ses_legacy1" },
+        { thread_ts: "901.1", session_id: "ses_legacy2" },
+      ],
+    });
+    const dirOf = (sessionID: string | undefined) =>
+      h.sessions.find((s) => s.id === sessionID)?.location.directory;
+    const queued = (thread: string) =>
+      h.messages.some((m) => m.thread_ts === thread && (m.text ?? "").startsWith("Queued"));
+
+    // New thread A starts a session in its own worktree directory, with no "Queued" reply.
+    h.send({ ts: "500.1" });
+    await h.until(() => h.prompts.length === 1);
+    assert.deepEqual(h.worktreeSlugs, ["500-1"]);
+    assert.equal(dirOf(h.prompts[0]?.sessionID), "/worktrees/500-1");
+    const sessionA = h.prompts[0]?.sessionID;
+
+    // New thread B runs concurrently: its prompt is delivered while A is still running, no "Queued".
+    h.send({ ts: "500.2" });
+    await h.until(() => h.prompts.length === 2);
+    assert.deepEqual([...h.worktreeSlugs].sort(), ["500-1", "500-2"]);
+    assert.equal(dirOf(h.prompts[1]?.sessionID), "/worktrees/500-2");
+    assert.notEqual(h.prompts[1]?.sessionID, sessionA);
+    assert.ok(!queued("500.1") && !queued("500.2"));
+
+    // A second message in thread A waits for A's running prompt: the same thread stays in order.
+    h.send({ ts: "500.3", thread_ts: "500.1", text: "second in A" });
+    await h.until(() => queued("500.1"));
+    assert.match(
+      h.messages.findLast((m) => m.thread_ts === "500.1")?.text ?? "",
+      /Queued: 1 ahead/,
+    );
+    await delay(200);
+    assert.equal(h.prompts.length, 2);
+    h.emit("session.execution.succeeded", sessionA ?? "");
+    await h.until(() => h.prompts.length === 3);
+    assert.equal(h.prompts[2]?.sessionID, sessionA);
+    assert.equal(h.prompts[2]?.text, "<@UOWNER>: second in A");
+
+    // An old mapping keeps /project and never creates a worktree; two such threads share the /project queue.
+    h.send({ ts: "900.2", thread_ts: "900.1", text: "legacy A" });
+    await h.until(() => h.prompts.length === 4);
+    assert.equal(h.prompts[3]?.sessionID, "ses_legacy1");
+    h.send({ ts: "901.2", thread_ts: "901.1", text: "legacy B" });
+    await h.until(() => queued("901.1"));
+    await delay(200);
+    assert.equal(h.prompts.length, 4);
+    assert.deepEqual([...h.worktreeSlugs].sort(), ["500-1", "500-2"]);
+    assert.equal(h.sessions.length, 2);
+    assert.deepEqual(h.unexpected, []);
+  },
+);
+
+await test("a worktree-enabled channel falls back to /project when the server refuses", async (t) => {
+  const h = await harness(t, { worktrees: true });
+  // The simulated server reports it cannot create a worktree safely (project config not disabled).
+  h.worktree.fails = true;
+  h.send({ ts: "600.1" });
+  await h.until(() => h.prompts.length === 1);
+  assert.equal(h.sessions[0]?.location.directory, "/project");
+  assert.match(h.logs(), /worktree unavailable, using \/project/);
+  assert.deepEqual(h.unexpected, []);
+});

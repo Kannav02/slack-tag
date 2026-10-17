@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { Plugin } from "@opencode/plugin";
 import { safeDecide, stripSecrets } from "./src/policy.ts";
 import { definition, status } from "./src/rpc.ts";
+import { createWorktree } from "./src/worktree.ts";
 
 const AGENT_SHELL = "/usr/local/bin/agent-shell";
 const MULTIPLAYER =
@@ -15,6 +16,7 @@ export default Plugin.define({
   async setup(ctx) {
     await ctx.rpc.register(definition, {
       status: async () => status(),
+      worktree: async (input) => createWorktree((input as { slug: string }).slug),
     });
     await ctx.permission.hook("evaluate", (input) => {
       const decision = safeDecide(input.action, input.resources);

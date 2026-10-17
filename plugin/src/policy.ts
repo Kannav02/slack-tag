@@ -8,7 +8,11 @@ const ASK: Decision = { effect: "ask" };
 const DENY: Decision = { effect: "deny", message: "Blocked by the safety plugin" };
 const READ = new Set(["read", "glob", "grep", "list", "search"]);
 const EDIT = new Set(["edit", "write", "patch"]);
-const PROTECTED = /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git\/hooks(\/|$)|\.git\/config$)/;
+// Also the worktree `.git` file and `.git/worktrees/` (commondir): editing them would point the server's
+// git at an agent-controlled config, which could run a command as the server. Git itself writes these;
+// the agent has no reason to edit them through a tool.
+const PROTECTED =
+  /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git\/hooks(\/|$)|\.git\/config$|\.git$|\.git\/worktrees(\/|$))/;
 const DOTENV = /(^|\/)\.env(\.|$)/;
 const SECRET = /OPENCODE_API_KEY|OPENCODE_SERVER_PASSWORD|SLACK_/;
 
