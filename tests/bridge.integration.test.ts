@@ -927,14 +927,13 @@ await test("a failed progress update still posts and persists an approval", asyn
   assert.ok(approval);
   assert.match(h.logs(), /progress update failed:.*message_not_found/);
   assert.equal(approval.thread_ts, "400.1");
-  assert.deepEqual(
-    {
-      ...h.db
-        .prepare("SELECT state, message_ts FROM approvals WHERE request_id = ?")
-        .get("per_progress_failure"),
-    },
-    { state: "pending", message_ts: approval.ts },
-  );
+  // The bridge saves the message's timestamp once Slack's reply arrives, just after the post itself.
+  const saved = () =>
+    h.db
+      .prepare("SELECT state, message_ts FROM approvals WHERE request_id = ?")
+      .get("per_progress_failure") as { state: string; message_ts: string | null } | undefined;
+  await h.until(() => Boolean(saved()?.message_ts));
+  assert.deepEqual({ ...saved() }, { state: "pending", message_ts: approval.ts });
   h.click("approve", "UOWNER", approval);
   await h.until(() => h.replies.length === 1);
   assert.deepEqual(h.replies[0], {
