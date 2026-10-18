@@ -375,6 +375,7 @@ await test("shell hook keeps existing Git config and makes plain pull fast-forwa
     },
     session: { hook: async () => undefined },
     tool: { transform: async () => undefined },
+    command: { transform: async () => undefined },
   };
   await plugin.setup(host as unknown as Setup);
   const work = await mkdtemp(join(tmpdir(), "slack-tag-pull-"));

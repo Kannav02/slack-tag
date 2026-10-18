@@ -143,6 +143,7 @@ await test("pull requests via the repository-bound Git proxy", { timeout: 20_000
     shell: { hook: async () => undefined },
     session: { hook: async () => undefined, get: async () => ({ location: { directory: dir } }) },
     tool: { transform: async (edit: (editor: typeof tools) => void) => edit(tools) },
+    command: { transform: async () => undefined },
   };
   await plugin.setup(host as unknown as Parameters<typeof plugin.setup>[0]);
   const open = () => tool!.execute({ title: "Add tool", body: "Hi." }, { sessionID: "ses_1" });
