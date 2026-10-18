@@ -29,6 +29,14 @@ const RUNS_DOWNLOAD =
   /\|\s*(sudo\s+)?(\S*\/)?(ba|z|da|k)?sh\b|\|\s*(\S*\/)?(python3?|node|perl|ruby|eval|source)\b|<\(\s*(curl|wget)\b|\$\(\s*(curl|wget)\b|`\s*(curl|wget)\b/;
 const ESCALATE = new Set(["sudo", "su", "doas"]);
 const WRAPPERS = new Set(["env", "command", "exec", "nohup", "time", "nice", "xargs", "builtin"]);
+// A `.git` path as a whole component, so `.git`, `.git/config`, `/project/.git` and `a/.git/b` match,
+// while `.github` or `foo.git` do not.
+const GIT_DIR = /(^|\/)\.git(\/|$)/;
+// Shell commands that move, copy or delete a path. Renaming `.git` aside and planting a writable one
+// bypasses the read-only `.git/config`, `.git/hooks` and `.git/commondir` mounts, after which the
+// server runs Git against an agent-controlled config and its filter/hook programs (#60). Git's own
+// subcommands never move `.git` and are checked separately, so they keep working.
+const GIT_MUTATORS = new Set(["mv", "cp", "rm", "rmdir", "unlink"]);
 // git options that take a separate value before the subcommand.
 const GIT_VALUE_OPTIONS = new Set([
   "-C",
@@ -93,13 +101,32 @@ function gitSubcommand(words: string[], start: number): { sub?: string; aliased:
   return { aliased };
 }
 
+// A `>` or `>>` redirect whose target is inside `.git` rewrites Git's own files (config, hooks,
+// commondir) straight from the shell, the same escalation as moving `.git` aside (#60).
+function redirectsIntoGit(command: string): boolean {
+  for (const match of command.matchAll(/\d*>>?\s*("[^"]*"|'[^']*'|[^\s;&|<>()`]+)/g)) {
+    if (GIT_DIR.test(match[1]!.replace(/['"]/g, ""))) return true;
+  }
+  return false;
+}
+
+// A move/copy/delete command (the word at `first`, past any env prefix or wrapper) with a `.git`
+// argument swaps the server's Git directory for an agent-controlled one (#60). `git` is never in the
+// set, so git's own subcommands are untouched.
+function mutatesGitDir(words: string[], first: number): boolean {
+  if (first < 0 || !GIT_MUTATORS.has(base(words[first]!))) return false;
+  return words.slice(first + 1).some((word) => GIT_DIR.test(word));
+}
+
 function denied(command: string): boolean {
   if (DOWNLOAD.test(command) && RUNS_DOWNLOAD.test(command)) return true;
+  if (redirectsIntoGit(command)) return true;
   for (const segment of command.split(/[;&|\n()`]|\$\(/)) {
     const words = tokens(segment);
     let first = words.findIndex((word) => !/^\w+=/.test(word));
     while (first >= 0 && WRAPPERS.has(base(words[first]!))) first++;
     if (first >= 0 && ESCALATE.has(base(words[first] ?? ""))) return true;
+    if (mutatesGitDir(words, first)) return true;
     // git can appear anywhere, for example inside `bash -c 'git push'`.
     for (let i = 0; i < words.length; i++) {
       if (base(words[i]!) !== "git") continue;

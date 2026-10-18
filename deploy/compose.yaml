@@ -52,6 +52,10 @@ services:
       - ${ALPHA_PROJECT}/.opencode:/project/.opencode:ro
       - ${ALPHA_PROJECT}/opencode.json:/project/opencode.json:ro
       - ${ALPHA_PROJECT}/opencode.jsonc:/project/opencode.jsonc:ro
+      # .git is its own mount point (read-write) so the agent cannot rename or delete it; the kernel
+      # refuses that with EBUSY, which would otherwise move the read-only mounts below aside and let
+      # a fresh writable .git with agent-chosen config/hooks/commondir run under the server (#60).
+      - ${ALPHA_PROJECT}/.git:/project/.git
       - ${ALPHA_PROJECT}/.git/hooks:/project/.git/hooks:ro
       - ${ALPHA_PROJECT}/.git/config:/project/.git/config:ro
       - ${ALPHA_PROJECT}/.git/commondir:/project/.git/commondir:ro
@@ -73,6 +77,8 @@ services:
       - ${BETA_PROJECT:-/nonexistent}/.opencode:/project/.opencode:ro
       - ${BETA_PROJECT:-/nonexistent}/opencode.json:/project/opencode.json:ro
       - ${BETA_PROJECT:-/nonexistent}/opencode.jsonc:/project/opencode.jsonc:ro
+      # .git is its own mount point (read-write) so it cannot be renamed or deleted; see alpha (#60).
+      - ${BETA_PROJECT:-/nonexistent}/.git:/project/.git
       - ${BETA_PROJECT:-/nonexistent}/.git/hooks:/project/.git/hooks:ro
       - ${BETA_PROJECT:-/nonexistent}/.git/config:/project/.git/config:ro
       - ${BETA_PROJECT:-/nonexistent}/.git/commondir:/project/.git/commondir:ro

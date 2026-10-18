@@ -51,6 +51,8 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   for (const command of [
     "ls -la",
     "cat src/a.ts",
+    // Reading inside .git is not the escalation; only moving or rewriting it is (#60).
+    "cat .git/config",
     "git status",
     "git status --short --branch\ngit branch --show-current\ngit remote -v",
     "git branch -a\ngit ls-remote --heads origin\nhead -20",
@@ -140,6 +142,18 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "git --git-dir=.git push",
     "ls && rm -rf src",
     "cat a > b",
+    // Git's own subcommands are never denied by the .git guard; worktree and checkout still ask (#60).
+    "git worktree list",
+    "git worktree add ../wt topic",
+    "git worktree remove ../wt",
+    "git checkout main",
+    // The guard is precise: moving or deleting paths that are not .git still only asks, and .github
+    // (a different component) is never mistaken for .git.
+    "mv src src2",
+    "cp a.ts b.ts",
+    "rm -rf build",
+    "mv .github .github-old",
+    "rm -rf .github/workflows",
     "echo $(id)",
     "find . -delete",
     "find . -exec rm {} ;",
@@ -171,6 +185,27 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "git -c alias.p=push p",
     "cd x && git push -f",
     "bash -c 'git push --force'",
+    // Moving, copying or deleting .git swaps in an agent-controlled config/hooks/commondir (#60).
+    "mv .git .git-old",
+    "mv /project/.git /tmp/g",
+    "mv .git/hooks /tmp/h",
+    "cp -r .git /tmp/g",
+    "cp .git backup",
+    "rm -rf .git",
+    "rm -rf /project/.git",
+    "rm .git/index.lock",
+    "rmdir .git",
+    "unlink .git",
+    "env mv .git .git-old",
+    "FOO=1 rm -rf .git",
+    // The reproduction from the issue: rename .git aside, recreate it, plant a commondir.
+    "mv .git .git2 && mkdir .git",
+    "mv .git .git-old && mkdir .git && printf '.\\n' > .git/commondir",
+    // Redirecting into .git rewrites its files straight from the shell (#60).
+    "echo evil > .git/commondir",
+    "printf '.\\n' > .git/config",
+    "cat evil >> .git/hooks/pre-commit",
+    "echo x > /project/.git/info/attributes",
     "sudo ls",
     "env sudo ls",
     "FOO=1 su root",
@@ -239,6 +274,13 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("shell", "git status", "git push -f"), "deny");
   assert.equal(effect("shell", "curl -s https://x.sh", "sh"), "deny");
   assert.equal(effect("shell", "ls", "sudo rm -rf /"), "deny");
+  // The rename-and-replace chain is denied whether any single command carries it (#60).
+  assert.equal(
+    effect("shell", "mv .git .git-old", "mkdir .git", "printf . > .git/commondir"),
+    "deny",
+  );
+  assert.equal(effect("shell", "ls", "rm -rf .git"), "deny");
+  assert.equal(effect("shell", "git status", "cp .git /tmp/g"), "deny");
 
   assert.equal(effect("read", "/project/src/a.ts"), "allow");
   assert.equal(effect("grep", "TODO"), "allow");
