@@ -115,6 +115,18 @@ const slack: SlackApi = {
     });
   },
   download,
+  // Slack's external upload flow. Text files get the same redaction as posts; images cannot be redacted.
+  async upload(channel_id, thread_ts, { name, data, caption }) {
+    const filename = name.replace(/[^\w.-]/g, "_");
+    const image = /\.(png|jpe?g|gif|webp)$/i.test(filename);
+    await app.client.files.uploadV2({
+      channel_id,
+      thread_ts,
+      filename,
+      file: image ? data : Buffer.from(redact(data.toString("utf8"))),
+      ...(caption ? { initial_comment: clean(caption) } : {}),
+    });
+  },
 };
 const onboarding = createOnboarding(
   config,

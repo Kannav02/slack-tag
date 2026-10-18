@@ -20,6 +20,9 @@ function plan(body) {
   if (last?.role === "tool") return { text: `Command finished: ${textOf(last.content).slice(0, 200)}` }
 
   const lastUser = [...messages].reverse().find((m) => m.role === "user")
+  // `ATTACH: <json>` calls the safety plugin's slack_attach tool with those arguments.
+  const attach = textOf(lastUser?.content).match(/ATTACH: (.+)/)
+  if (attach) return { tool: { name: "slack_attach", args: JSON.parse(attach[1]) } }
   const match = textOf(lastUser?.content).match(/RUN: (.+)/)
   const shell = (body.tools ?? []).find((t) => ["shell", "bash"].includes(t.function?.name))
   if (match && shell) {

@@ -50,7 +50,7 @@ flowchart LR
 | Credentials `/etc/slack-tag` | root, files `0600`; systemd reads `bridge.env` before dropping to `slack-tag` | `bridge.env` (Slack tokens, one password per hand-made channel), `<project>.env` (that server's password), `proxy.env` (model key). |
 | OpenCode container | Starts as root, `start-server` drops the server to `node` (uid 1000); `agent-shell` runs agent shells as `agent` (uid 1001). gVisor (`runsc`) by default. | `opencode serve` with the project at `/project`, uploads at `/inbox` (read-only) and its own `/data` volume. Hand-made channels use `deploy/compose.yaml`; registered ones use `deploy/project.yaml`. |
 | key-proxy container | uid 1000, read-only, no capabilities | Swaps the placeholder key for the real model key and forwards only to `https://opencode.ai/zen/go/v1`. One per registered project; one shared by hand-made projects. |
-| Safety plugin (`plugin/`) | Inside the server process | Decides permission requests (policy version 3), strips secrets from agent shells, reports its policy version over RPC. |
+| Safety plugin (`plugin/`) | Inside the server process | Decides permission requests (policy version 3), strips secrets from agent shells, reports its policy version over RPC, and provides the `slack_attach` tool, whose files the bridge fetches over RPC. |
 | git-proxy container (optional) | uid 1000, read-only, no capabilities | Holds the host GitHub token; forwards one repository's Git traffic and, when enabled, its pull request calls. See [Git proxy](git-proxy.md). |
 | Host firewall (`deploy/firewall.sh`) | root, `slack-tag-firewall.service` | Drops traffic from `st-*` bridges to `169.254.0.0/16` and to the host itself. |
 
@@ -85,6 +85,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Slack tokens and every channel's server password are redacted in posts, updates, ephemerals and nested block text. | **Tested** (SEC-3) |
 | `<!channel>`, `<!here>`, `@everyone` and similar in agent output are neutralised. | **Tested** (SEC-3); how real Slack renders them is not verified |
 | Failures post a generic message; details go to the bridge log. Registration still shows the last 500 characters of a failed step's error. | **Tested** |
+| Files the agent posts with `slack_attach` go to its session's thread (a subagent's to its nearest mapped ancestor's) through Slack's external upload; the Slack SDK also sends the bot token to the upload URL Slack's API returns. Text files and captions get the same redaction; images cannot be redacted. A failed upload or an expired file posts a short note, and the run continues. | **Tested**; needs the `files:write` scope, not checked in real Slack |
 
 ### Bridge → OpenCode server
 
@@ -139,6 +140,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Agent shells get no server password or `SLACK_` variable, and as uid 1001 cannot read the server's `/proc/<pid>/environ`. | **Real** (S1, S2, SEC-5) |
 | Built-in read, list, glob and grep tools run in the server process (uid 1000), so the plugin refuses them without asking when the path resolves (after `..`, relative paths and existing symlinks) under `/proc` (the server's environment) or `/data` (the server's `HOME` and session store). This covers `external_directory` requests there and grep over a parent such as `/`. Other external folders still ask. | **Tested**, **Real** (#51, OpenCode 2.0.15 outside a container) |
 | The agent can still use its project's key proxy to spend inference. | By design |
+| `slack_attach` needs no approval (OpenCode does not consult the permission hook for plugin tools). It reads through `agent-shell` as uid 1001 with a bare environment, so it posts only what the agent could read itself: a regular file of an allowed type (images checked by signature, text without NUL bytes), at most 10 MB, under the session folder, `/project` or `/tmp`, with no symlink on its path. The bridge never opens the project: it fetches each file once over the password-protected plugin RPC, only for the session that attached it, within 10 minutes. | **Real** (`spike/v2/attach.sh`; the image's users and capabilities reproduced in a mount namespace, not the Docker image or gVisor) |
 
 ### Agent → network
 
