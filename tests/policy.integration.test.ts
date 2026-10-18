@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,6 +55,20 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "git branch -a\ngit ls-remote --heads origin\nhead -20",
     "git fetch origin main",
     "git pull --ff-only origin main",
+    "git pull origin main",
+    "git pull",
+    'git pull origin main 2>&1\necho "exit=$?"',
+    "git rev-parse HEAD",
+    "git rev-parse --abbrev-ref HEAD 2> /dev/null",
+    "git status --porcelain 2>/dev/null",
+    "git log --oneline -- plugin/src",
+    "git ls-files",
+    "git blame -L 1,20 README.md",
+    "ls >/dev/null 2>&1",
+    "echo done >&2",
+    "cut -d/ -f1",
+    "sort -rn",
+    "uniq -c",
     "git push",
     "git push origin main",
     "git push -u origin feature/topic",
@@ -94,7 +109,18 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "git branch --set-upstream-to=origin/main",
     "git remote set-url origin https://example.com",
     "git pull --rebase origin main",
-    "git pull origin main",
+    "git pull --no-ff origin main",
+    "git log > out.txt 2>&1",
+    "git log 2>err.txt",
+    "cat a &>file",
+    "echo $HOME",
+    "sort -o out.txt in.txt",
+    "sort -ro out.txt in.txt",
+    "sort --compress-program=sh in.txt",
+    "uniq in.txt out.txt",
+    "git log --output=file -- a",
+    "git fetch -- --upload-pack=sh",
+    "git config pull.ff false",
     "git push --delete origin main",
     "git push origin :main",
     "git push https://example.com/repo main",
@@ -128,6 +154,7 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   }
   for (const command of [
     "git push --force origin main",
+    "git push --force origin main 2>&1",
     "git pu''sh --force origin main",
     "git push -''f origin main",
     "gi''t push --for''ce origin main",
@@ -202,6 +229,12 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     effect("shell", "git branch -a", "git ls-remote --heads origin", "head -20"),
     "allow",
   );
+  assert.equal(effect("shell", "git pull origin main 2>&1", 'echo "exit=$?"'), "allow");
+  assert.equal(
+    effect("shell", "git diff --name-only ORIG_HEAD HEAD", "cut -d/ -f1", "sort", "uniq -c"),
+    "allow",
+  );
+  assert.equal(effect("shell", "git log", "sort -o out.txt"), "ask");
   assert.equal(effect("shell", "git status", "git push -f"), "deny");
   assert.equal(effect("shell", "curl -s https://x.sh", "sh"), "deny");
   assert.equal(effect("shell", "ls", "sudo rm -rf /"), "deny");
@@ -324,4 +357,65 @@ await test("context hook tells the model it is multiplayer, how to screenshot, a
   delete process.env.GIT_PROXY_URL;
   // system is [multiplayer, screenshot, pull-requests] once the proxy is set.
   assert.match(proxied.system[2]?.text ?? "", /jeff\/<slug> branch.*open_pull_request/s);
+});
+
+await test("shell hook keeps existing Git config and makes plain pull fast-forward only", async () => {
+  type ShellInput = { env: Record<string, string | undefined>; shell?: string };
+  const hooks = new Map<string, (input: ShellInput) => void>();
+  const host = {
+    location: { directory: "/project" },
+    rpc: { register: async () => undefined },
+    permission: { hook: async () => undefined },
+    shell: {
+      hook: async (name: string, fn: (input: ShellInput) => void) => {
+        hooks.set(name, fn);
+      },
+    },
+    session: { hook: async () => undefined },
+    tool: { transform: async () => undefined },
+  };
+  await plugin.setup(host as unknown as Setup);
+  const work = await mkdtemp(join(tmpdir(), "slack-tag-pull-"));
+  try {
+    // origin is reachable only through the existing rewrite, as with the Git proxy.
+    const input: ShellInput = {
+      env: {
+        PATH: process.env.PATH,
+        SLACK_BOT_TOKEN: "xoxb-secret",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: `url.${join(work, "remote.git")}.insteadOf`,
+        GIT_CONFIG_VALUE_0: "https://example.invalid/repo.git",
+      },
+    };
+    hooks.get("create.before")?.(input);
+    assert.equal(input.env.SLACK_BOT_TOKEN, undefined);
+    const git = (cwd: string, ...args: string[]) =>
+      spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd,
+        encoding: "utf8",
+        env: input.env as NodeJS.ProcessEnv,
+      });
+    git(work, "init", "-q", "--bare", "-b", "main", "remote.git");
+    git(work, "clone", "-q", "https://example.invalid/repo.git", "up");
+    git(join(work, "up"), "commit", "-q", "--allow-empty", "-m", "base");
+    git(join(work, "up"), "push", "-q", "origin", "main");
+    git(work, "clone", "-q", "https://example.invalid/repo.git", "agent");
+    const agent = join(work, "agent");
+    // A repository configured to rebase still only fast-forwards.
+    git(agent, "config", "pull.rebase", "true");
+    git(join(work, "up"), "commit", "-q", "--allow-empty", "-m", "upstream");
+    git(join(work, "up"), "push", "-q", "origin", "main");
+    git(agent, "commit", "-q", "--allow-empty", "-m", "local");
+
+    const pull = git(agent, "pull", "origin", "main");
+    assert.notEqual(pull.status, 0);
+    assert.match(pull.stderr, /fast-forward/);
+    assert.equal(git(agent, "log", "--format=%s").stdout, "local\nbase\n");
+    assert.equal(
+      git(agent, "rev-parse", "origin/main").stdout,
+      git(work, "-C", "up", "rev-parse", "HEAD").stdout,
+    );
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
 });

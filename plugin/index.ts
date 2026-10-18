@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { Plugin } from "@opencode/plugin";
 import { attach, take } from "./src/attach.ts";
-import { safeDecide, stripSecrets } from "./src/policy.ts";
+import { fastForwardPulls, safeDecide, stripSecrets } from "./src/policy.ts";
 import { pullRequestTool } from "./src/pull-request.ts";
 import { definition, status } from "./src/rpc.ts";
 
@@ -39,6 +39,7 @@ export default Plugin.define({
     const agentShell = existsSync(AGENT_SHELL);
     await ctx.shell.hook("create.before", (input) => {
       stripSecrets(input.env);
+      fastForwardPulls(input.env);
       if (agentShell) input.shell = AGENT_SHELL;
     });
     await attach(ctx, agentShell ? AGENT_SHELL : "/bin/sh");

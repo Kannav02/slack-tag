@@ -40,12 +40,22 @@ const GIT_VALUE_OPTIONS = new Set([
   "--config-env",
 ]);
 
-const READ_ONLY = new Set(["ls", "cat", "head", "tail", "wc", "pwd", "echo", "grep"]);
+const READ_ONLY = new Set(["ls", "cat", "head", "tail", "wc", "pwd", "echo", "grep", "cut", "tr"]);
+// Merging or discarding output cannot write a file, and `$?` always expands to a number.
+const HARMLESS_REDIRECT = /(^|\s)([12]?>&[12]|[12&]?>>?\s*\/dev\/null|<\s*\/dev\/null)(?=\s|$)/g;
 const GIT_SAFE = new Set([
   "status",
   "log",
   "diff",
   "show",
+  "rev-parse",
+  "rev-list",
+  "ls-files",
+  "show-ref",
+  "blame",
+  "shortlog",
+  "describe",
+  "merge-base",
   "branch",
   "switch",
   "add",
@@ -140,9 +150,13 @@ function shellWords(command: string): string[] | undefined {
   return words;
 }
 
+// A bare `--` only ends the options, as in `git log -- path`.
 function hasOption(flags: string[], names: string[]): boolean {
   return flags.some(
-    (flag) => flag.startsWith("--") && names.some((name) => name.startsWith(flag.split("=")[0]!)),
+    (flag) =>
+      flag.startsWith("--") &&
+      flag !== "--" &&
+      names.some((name) => name.startsWith(flag.split("=")[0]!)),
   );
 }
 
@@ -187,7 +201,6 @@ function safeGit(sub: string, rest: string[]): boolean {
     "ls-remote": /^(--(heads|branches|tags|refs|quiet|exit-code)|-q)$/,
   };
   if (flags.some((flag) => !options[sub]!.test(flag))) return false;
-  if (sub === "pull" && !flags.includes("--ff-only")) return false;
   // Only configured remote names and ordinary refs, never URLs, paths or +refspecs.
   const args = rest.filter((word) => !word.startsWith("-"));
   if (args.length && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(args[0]!)) return false;
@@ -219,12 +232,19 @@ function safeScreenshot(args: string[]): boolean {
 }
 
 function safeShell(command: string): boolean {
-  const words = shellWords(command);
+  const words = shellWords(command.replace(HARMLESS_REDIRECT, "$1").replace(/\$\?/g, "0"));
   if (!words) return false;
   const [name, sub, ...rest] = words;
   if (!name || name.includes("/") || name.includes("=")) return false;
   if (name === "playwright") return sub === "screenshot" && safeScreenshot(rest);
   if (READ_ONLY.has(name)) return true;
+  // sort can write a file or run a compressor; uniq writes its second file argument.
+  if (name === "sort")
+    return (
+      !words.some((word) => /^-[^-]*o/.test(word)) &&
+      !hasOption(words, ["--output", "--compress-program"])
+    );
+  if (name === "uniq") return words.slice(1).filter((word) => !word.startsWith("-")).length < 2;
   if (name === "rg") return !command.includes("--pre");
   if (name === "find") return ![sub, ...rest].some((word) => FIND_UNSAFE.test(word ?? ""));
   if (name === "pytest" || name === "make" || name === "tsc") return true;
@@ -284,6 +304,15 @@ export function safeDecide(action: string, resources: readonly string[], path?: 
   } catch {
     return ASK;
   }
+}
+
+// Plain `git pull` runs without approval, so agent shells only fast-forward unless a flag says otherwise.
+export function fastForwardPulls(env: Record<string, string | undefined>): void {
+  const count = Number(env.GIT_CONFIG_COUNT ?? 0);
+  if (!Number.isInteger(count) || count < 0) return;
+  env[`GIT_CONFIG_KEY_${count}`] = "pull.ff";
+  env[`GIT_CONFIG_VALUE_${count}`] = "only";
+  env.GIT_CONFIG_COUNT = String(count + 1);
 }
 
 export function stripSecrets(env: Record<string, string | undefined>): void {
