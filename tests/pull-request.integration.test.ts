@@ -130,13 +130,20 @@ await test("pull requests via the repository-bound Git proxy", { timeout: 20_000
   git("init", "-q", "-b", "jeff/tool");
   git("remote", "add", "origin", "git@github.com-kannav02:owner/repo.git");
   let tool: Tool | undefined;
-  const tools = { add: (added: Tool) => (tool = added) };
+  // setup also registers slack_attach; keep the pull-request tool specifically.
+  const tools = {
+    add: (added: Tool) => {
+      if ((added as { name?: string }).name === "open_pull_request") tool = added;
+    },
+  };
   const host = {
+    location: { directory: dir },
     rpc: { register: async () => undefined },
     permission: { hook: async () => undefined },
     shell: { hook: async () => undefined },
     session: { hook: async () => undefined, get: async () => ({ location: { directory: dir } }) },
     tool: { transform: async (edit: (editor: typeof tools) => void) => edit(tools) },
+    command: { transform: async () => undefined },
   };
   await plugin.setup(host as unknown as Parameters<typeof plugin.setup>[0]);
   const open = () => tool!.execute({ title: "Add tool", body: "Hi." }, { sessionID: "ses_1" });

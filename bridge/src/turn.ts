@@ -15,6 +15,7 @@ import { refusal, store, type SlackFile } from "./attachments.ts";
 import { commandOf, control, SERVER_COMMANDS } from "./commands.ts";
 import type { Channel, Config } from "./config.ts";
 import type { Approval, Db } from "./db.ts";
+import { createFixLog } from "./fixlog.ts";
 import {
   cardText,
   describeStep,
@@ -23,6 +24,7 @@ import {
   startProgress,
   type Progress,
 } from "./progress.ts";
+import { attachment, sendFile, type OutgoingFile, type ToolSuccess } from "./upload.ts";
 
 const LIMIT = 3500;
 const EDIT_MS = 1000;
@@ -42,6 +44,7 @@ export type SlackApi = {
     text: string,
   ) => Promise<void>;
   download: (url: string) => Promise<Response>;
+  upload: (channel: string, threadTs: string, file: OutgoingFile) => Promise<void>;
 };
 
 export type Incoming = {
@@ -161,6 +164,7 @@ export function createRouter(
   const queues = new Map<string, Queue>();
   // The Slack message each session's next execution answers, until its execution starts.
   const triggers = new Map<string, string>();
+  const fixes = createFixLog(slack);
   let chain = Promise.resolve();
   // Run bridge tasks one at a time; a failed task is logged and never stops the chain.
   const later = (task: () => Promise<unknown>) => {
@@ -311,9 +315,12 @@ export function createRouter(
       triggers.set(job.sessionId, job.messageTs);
       slack.react(job.channelId, job.messageTs, "eyes", true).catch(() => undefined);
       try {
+        // A /fix run's shell commands are recorded from before it starts until it settles.
+        if (job.command === "fix") fixes.start(job.sessionId, job.channelId, job.threadTs);
         if (job.command) await command(job.client, job.sessionId, job.command, job.text, job.files);
         else await prompt(job.client, job.sessionId, job.text, job.files);
       } catch (error) {
+        fixes.drop(job.sessionId);
         queue.running = undefined;
         triggers.delete(job.sessionId);
         await slack.react(job.channelId, job.messageTs, "eyes", false).catch(() => undefined);
@@ -397,6 +404,14 @@ export function createRouter(
     );
   }
 
+  // A file from slack_attach goes where an approval request would, so a subagent's reaches its parent's thread.
+  async function attach(client: Client, event: ToolSuccess) {
+    const id = event.data.metadata?.slackAttach;
+    if (typeof id !== "string") return;
+    const to = await threadOf(client, event.data.sessionID);
+    if (to) await sendFile(slack, to.channel_id, to.thread_ts, attachment(client, event, id));
+  }
+
   async function settle(row: Approval, note: string) {
     const text = `${row.summary}\n*${note}*`;
     if (row.message_ts) await slack.update(row.channel_id, row.message_ts, text, blocks(text));
@@ -457,6 +472,8 @@ export function createRouter(
       );
       return ask(event.data, client);
     }
+    if (event.type === "session.tool.success") await attach(client, event);
+    await fixes.see(event);
     // Succeeded, failed or interrupted: the project's next queued prompt may start.
     if (event.type.startsWith("session.execution.") && event.type !== "session.execution.started")
       release(event.data.sessionID);

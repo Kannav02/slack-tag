@@ -79,7 +79,10 @@ async function harness(t: TestContext) {
   ];
   // OpenCode answers its first model lists with an empty catalog while it is still loading.
   const catalog = { emptyLists: 0 };
-  const slackErrors = { updateTs: "" };
+  const slackErrors = { updateTs: "", upload: false };
+  // Files the plugin RPC hands out, by "<session>/<id>", and every fetch and upload request.
+  const attachments: Record<string, Record<string, string>> = {};
+  const uploads: Record<string, unknown>[] = [];
   const unexpected: string[] = [];
   const replies: Record<string, unknown>[] = [];
   const reactions: string[] = [];
@@ -127,6 +130,18 @@ async function harness(t: TestContext) {
     if (path === "/files/note.txt") return res.end("uploaded note");
     if (path === "/api/rpc/slack-tag/status")
       return json({ output: { pluginVersion: "test", policyVersion: 3 } });
+    if (path === "/api/rpc/slack-tag/attachment") {
+      const { input } = z.object({ input: z.record(z.string(), z.string()) }).parse(args);
+      uploads.push({ path, ...input });
+      return json({ output: attachments[`${input.sessionID}/${input.id}`] ?? {} });
+    }
+    // Slack's external upload flow: get an upload URL, send the bytes there, complete in the thread.
+    if (/^\/(upload\/F1|api\/files\.(getUploadURLExternal|completeUploadExternal))$/.test(path)) {
+      uploads.push({ path, raw, ...anyCall.parse(args) });
+      if (path === "/upload/F1") return res.end("OK");
+      if (slackErrors.upload) return json({ ok: false, error: "missing_scope" });
+      return json({ ok: true, upload_url: `${base}/upload/F1`, file_id: "F1", files: [] });
+    }
     if (path === "/api/model") {
       if (catalog.emptyLists > 0) {
         catalog.emptyLists--;
@@ -397,6 +412,8 @@ async function harness(t: TestContext) {
     fetched,
     catalog,
     slackErrors,
+    attachments,
+    uploads,
     unexpected,
     logs: () => logs,
     until,
@@ -1157,6 +1174,52 @@ await test(
   },
 );
 
+await test("slack_attach files reach the thread redacted; a failed upload only posts a note", async (t) => {
+  const h = await harness(t);
+  h.send({ ts: "500.1" });
+  await h.until(() => h.prompts.length === 1);
+  const sessionID = h.sessions[0]?.id ?? "";
+  const tool = (type: string, session: string, data: object) =>
+    h.emit(`session.tool.${type}`, session, undefined, { sessionID: session, id: "c1", ...data });
+  const log = "tests passed\npw-synthetic-secret xoxb-synthetic-secret\n";
+  const caption = "Log for <!channel> pw-synthetic-secret";
+  const data = Buffer.from(log).toString("base64");
+  h.attachments[`${sessionID}/a1`] = { name: "test.log", data, caption };
+  h.emit("session.execution.started", sessionID);
+  tool("input.started", sessionID, { name: "slack_attach" });
+  tool("called", sessionID, { input: { path: "/project/out/test.log", caption } });
+  tool("success", sessionID, { metadata: { slackAttach: "a1" } });
+  await h.until(() => h.uploads.some((u) => u.path === "/api/files.completeUploadExternal"));
+  const [fetch, url, upload, done] = h.uploads;
+  assert.deepEqual(fetch, { path: "/api/rpc/slack-tag/attachment", sessionID, id: "a1" });
+  const redacted = "tests passed\n[redacted] [redacted]\n";
+  assert.deepEqual([url?.filename, url?.length], ["test.log", String(redacted.length)]);
+  assert.ok(String(upload?.raw).includes(redacted));
+  assert.deepEqual([done?.channel_id, done?.thread_ts], ["CTEST", "500.1"]);
+  assert.equal(done?.initial_comment, "Log for @\u200bchannel [redacted]");
+  assert.ok(!JSON.stringify(h.uploads).includes("synthetic-secret"));
+
+  // A subagent's file goes to its parent's thread. Neither Slack refusing the upload nor an
+  // expired attachment stops the run: each posts a note.
+  h.slackErrors.upload = true;
+  const png = Buffer.from("89504e470d0a1a0a", "hex").toString("base64");
+  h.attachments["ses_child/a2"] = { name: "shot.png", data: png };
+  tool("success", "ses_child", { metadata: { slackAttach: "a2" } });
+  tool("success", sessionID, { metadata: { slackAttach: "expired" } });
+  const notes = () => h.messages.filter((m) => /could not be attached/.test(m.text ?? ""));
+  await h.until(() => notes().length === 2);
+  assert.ok(notes().every((m) => m.thread_ts === "500.1"));
+  assert.ok(h.uploads.some((u) => u.filename === "shot.png"));
+  assert.match(h.logs(), /missing_scope[^]*expired or was already sent/);
+  h.emit("session.text.delta", sessionID, "Here it is.");
+  h.emit("session.execution.succeeded", sessionID);
+  const card = () => h.messages.findLast((m) => m.text?.startsWith("*✓ Done*"))?.text ?? "";
+  await h.until(card);
+  assert.match(card(), /\n✓ Attached `out\/test\.log`$/);
+  assert.ok(h.reactions.includes("+white_check_mark@500.1"));
+  assert.deepEqual(h.unexpected, []);
+});
+
 await test(
   "a channel's approvers decide its approval requests; other members and other channels' approvers cannot",
   { timeout: 30_000 },
@@ -1259,4 +1322,94 @@ await test("approvers that are not Slack user IDs stop startup", { timeout: 20_0
     assert.notEqual(child.exitCode, 0);
     assert.match(await errors, /channel CA approvers must be a list of Slack user IDs/);
   }
+});
+
+await test("/fix runs the plugin's command and uploads the shell commands its own session ran", async (t) => {
+  const h = await harness(t);
+  h.send({ ts: "600.1", text: "<@UBOT> /fix the login test fails" });
+  await h.until(() => h.calls.length === 1);
+  const sessionID = h.sessions[0]?.id ?? "";
+  assert.deepEqual(h.calls[0], {
+    type: "command",
+    sessionID,
+    name: "fix",
+    text: "the login test fails",
+    files: [],
+    delivery: "queue",
+  });
+  // Shapes from real OpenCode 2.0.15 (spike/v2/fix-check.mjs): a non-zero exit is a success with an exit code.
+  const tool = (session: string, id: string, type: string, data: object) =>
+    h.emit(`session.tool.${type}`, session, undefined, { sessionID: session, id, ...data });
+  const shell = (session: string, id: string, command: string) => {
+    tool(session, id, "input.started", { name: "shell" });
+    tool(session, id, "called", { input: { command } });
+  };
+  const exit = (code: number, ...text: string[]) => ({
+    content: text.map((part) => ({ type: "text", text: part })),
+    metadata: { status: "completed", truncated: false, exit: code },
+  });
+  h.emit("session.execution.started", sessionID);
+  shell(sessionID, "c1", "npm test");
+  tool(sessionID, "c1", "success", exit(1, "FAIL login\n", "Exited with code 1"));
+  tool(sessionID, "c2", "input.started", { name: "read" });
+  tool(sessionID, "c2", "called", { input: { path: "/project/src/login.ts" } });
+  shell("ses_child", "c3", "echo from a subagent");
+  shell(sessionID, "c4", "echo pw-synthetic-secret");
+  tool(sessionID, "c4", "success", exit(0, "xoxb-synthetic-secret\n"));
+  shell(sessionID, "c5", "sudo true");
+  tool(sessionID, "c5", "failed", {
+    error: { type: "permission.rejected", message: "Blocked by the safety plugin" },
+  });
+  shell(sessionID, "c6", "npm test");
+  h.emit("session.execution.interrupted", sessionID);
+  await h.until(() => h.uploads.some((u) => u.path === "/api/files.completeUploadExternal"));
+  const [url, upload, done] = h.uploads;
+  const log = [
+    "Shell commands of this /fix run, recorded by the bridge from OpenCode's tool events, not from " +
+      "the model's reply. Each shows its result and the end of its output.",
+    "$ npm test\n[exit 1]\nFAIL login\nExited with code 1",
+    "$ echo [redacted]\n[exit 0]\n[redacted]",
+    "$ sudo true\n[failed: Blocked by the safety plugin]",
+    "$ npm test\n[no result before the run ended]\n",
+  ].join("\n\n");
+  assert.deepEqual([url?.filename, url?.length], ["fix-commands.log", String(log.length)]);
+  assert.ok(String(upload?.raw).includes(log));
+  assert.deepEqual(
+    [done?.channel_id, done?.thread_ts, done?.initial_comment],
+    ["CTEST", "600.1", "Commands Jeff ran for /fix"],
+  );
+
+  // A /fix run without shell commands, then a plain prompt in the same session, upload nothing.
+  h.send({ ts: "600.2", thread_ts: "600.1", text: "<@UBOT> /fix" });
+  await h.until(() => h.calls.length === 2);
+  assert.deepEqual([h.calls[1]?.name, h.calls[1]?.text], ["fix", ""]);
+  h.emit("session.execution.started", sessionID);
+  tool(sessionID, "c7", "input.started", { name: "read" });
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.reactions.includes("+white_check_mark@600.2"));
+  h.send({ ts: "600.3", thread_ts: "600.1", text: "run the tests" });
+  await h.until(() => h.prompts.length === 1);
+  h.emit("session.execution.started", sessionID);
+  shell(sessionID, "c8", "npm test");
+  tool(sessionID, "c8", "success", exit(0, "ok\n"));
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.reactions.includes("+white_check_mark@600.3"));
+  assert.equal(h.uploads.length, 3);
+
+  // The log keeps the last 200 commands and the end of each output.
+  h.send({ ts: "600.4", thread_ts: "600.1", text: "<@UBOT> /fix the build" });
+  await h.until(() => h.calls.length === 3);
+  for (let i = 0; i <= 200; i++) shell(sessionID, `d${i}`, `echo ${i}`);
+  tool(sessionID, "d200", "success", exit(0, `start ${"x".repeat(3000)} end`));
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.uploads.length === 6);
+  const capped = String(h.uploads[4]?.raw);
+  assert.ok(capped.includes("(Earlier commands not shown: 1.)\n\n$ echo 1\n"));
+  assert.ok(capped.includes(`\n\n$ echo 200\n[exit 0]\n…${"x".repeat(1996)} end\n`));
+
+  // Arguments with !`…` stay a prompt, so a project's own fix command never runs them on the server.
+  h.send({ ts: "600.5", thread_ts: "600.1", text: "<@UBOT> /fix !`id`" });
+  await h.until(() => h.prompts.length === 2);
+  assert.equal(h.prompts[1]?.text, "<@UOWNER>: /fix !`id`");
+  assert.deepEqual(h.unexpected, []);
 });

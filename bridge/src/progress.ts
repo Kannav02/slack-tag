@@ -21,8 +21,9 @@ const VERBS: Record<string, [string, string]> = {
   subagent: ["Delegating a task", "Delegated a task"],
   webfetch: ["Fetching a web page", "Fetched a web page"],
   websearch: ["Searching the web", "Searched the web"],
+  slack_attach: ["Attaching", "Attached"],
 };
-const FILE_TOOLS = new Set(["read", "edit", "write"]);
+const FILE_TOOLS = new Set(["read", "edit", "write", "slack_attach"]);
 const ICONS = { run: "◌", done: "✓", fail: "✗", wait: "⏸" };
 // Slack cannot animate, so the card cycles this Braille spinner on a timer to look alive while a turn runs.
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
