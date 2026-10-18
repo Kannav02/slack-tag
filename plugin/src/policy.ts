@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { relative, resolve } from "node:path";
+
 export const PLUGIN_VERSION = "1";
 export const POLICY_VERSION = 3;
 
@@ -11,6 +14,12 @@ const EDIT = new Set(["edit", "write", "patch"]);
 const PROTECTED = /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git\/hooks(\/|$)|\.git\/config$)/;
 const DOTENV = /(^|\/)\.env(\.|$)/;
 const SECRET = /OPENCODE_API_KEY|OPENCODE_SERVER_PASSWORD|SLACK_/;
+// Built-in tools run in the server process: /proc exposes its environment, /data (its HOME) its sessions.
+const SERVER_ONLY = ["/proc", "/data"];
+const SERVER_DENY: Decision = {
+  effect: "deny",
+  message: "Server-only path, blocked by the safety plugin",
+};
 
 // Newlines are handled as independent commands; other shell syntax requires approval.
 const COMPOUND = /[;&|<>`\r\\$(){}]/;
@@ -205,7 +214,30 @@ function safeShell(command: string): boolean {
   return name === "git" && safeGit(sub ?? "", rest);
 }
 
-export function decide(action: string, resources: readonly string[]): Decision {
+// Relative paths resolve against the server's directory (/project); symlinks resolve when the path exists.
+function serverOnly(path: string, parent: boolean): boolean {
+  let full = resolve(path);
+  try {
+    full = realpathSync(full);
+  } catch {}
+  return SERVER_ONLY.some((root) => within(root, full) || (parent && within(full, root)));
+}
+
+function within(folder: string, path: string): boolean {
+  const rest = relative(folder, path);
+  return rest !== ".." && !rest.startsWith("../");
+}
+
+function readsServer(action: string, resources: readonly string[], path: unknown): boolean {
+  if (!READ.has(action) && action !== "external_directory") return false;
+  const search = action === "glob" || action === "grep";
+  const paths = search ? (typeof path === "string" ? [path] : []) : resources;
+  // A grep over a parent such as / would read file contents under /proc.
+  return paths.some((item) => serverOnly(item, action === "grep"));
+}
+
+/** `path` is the folder OpenCode sends as metadata for glob and grep, whose resources are patterns. */
+export function decide(action: string, resources: readonly string[], path?: unknown): Decision {
   if (action === "shell") {
     // OpenCode splits chains and pipelines into one resource per command, so every part is checked.
     const command = resources.join(" | ");
@@ -219,14 +251,15 @@ export function decide(action: string, resources: readonly string[]): Decision {
     if (resources.some((path) => PROTECTED.test(path))) return DENY;
     return resources.every((path) => !path.split("/").includes("..")) ? ALLOW : ASK;
   }
+  if (readsServer(action, resources, path)) return SERVER_DENY;
   if (READ.has(action)) return resources.some((path) => DOTENV.test(path)) ? ASK : ALLOW;
   return ASK;
 }
 
 // Errors never allow: the action waits for the owner instead.
-export function safeDecide(action: string, resources: readonly string[]): Decision {
+export function safeDecide(action: string, resources: readonly string[], path?: unknown): Decision {
   try {
-    return decide(action, resources);
+    return decide(action, resources, path);
   } catch {
     return ASK;
   }
