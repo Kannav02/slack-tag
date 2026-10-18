@@ -4,6 +4,7 @@ import { appendFileSync } from "node:fs"
 // Scripted OpenAI-compatible model. A user message containing `RUN: <command>`
 // makes the model call the shell tool with that command; once the tool result
 // arrives it answers with plain text. Anything else gets a plain text answer.
+// Several RUN lines run one per step, in order, before the text answer.
 
 const port = Number(process.env.MOCK_PORT ?? 4010)
 const log = process.env.MOCK_LOG
@@ -17,14 +18,18 @@ function textOf(content) {
 function plan(body) {
   const messages = body.messages ?? []
   const last = messages.at(-1)
-  if (last?.role === "tool") return { text: `Command finished: ${textOf(last.content).slice(0, 200)}` }
-
   const lastUser = [...messages].reverse().find((m) => m.role === "user")
-  const match = textOf(lastUser?.content).match(/RUN: (.+)/)
+  const runs = [...textOf(lastUser?.content).matchAll(/RUN: (.+)/g)].map((m) => m[1].trim())
+  const done = messages.slice(messages.indexOf(lastUser)).filter((m) => m.role === "tool").length
+  if (last?.role === "tool" && done >= runs.length) return { text: `Command finished: ${textOf(last.content).slice(0, 200)}` }
+
+  // `ATTACH: <json>` calls the safety plugin's slack_attach tool with those arguments.
+  const attach = textOf(lastUser?.content).match(/ATTACH: (.+)/)
+  if (attach) return { tool: { name: "slack_attach", args: JSON.parse(attach[1]) } }
   const shell = (body.tools ?? []).find((t) => ["shell", "bash"].includes(t.function?.name))
-  if (match && shell) {
+  if (runs[done] && shell) {
     const props = Object.keys(shell.function.parameters?.properties ?? {})
-    const args = { command: match[1].trim() }
+    const args = { command: runs[done] }
     if (props.includes("description")) args.description = "spike command"
     return { tool: { name: shell.function.name, args } }
   }
@@ -51,7 +56,8 @@ createServer((req, res) => {
     }
     const body = raw ? JSON.parse(raw) : {}
     const step = plan(body)
-    if (log) appendFileSync(log, JSON.stringify({ url: req.url, headers: req.headers, tools: body.tools?.map((t) => t.function?.name), step }) + "\n")
+    const user = textOf(body.messages?.findLast((m) => m.role === "user")?.content)
+    if (log) appendFileSync(log, JSON.stringify({ url: req.url, headers: req.headers, tools: body.tools?.map((t) => t.function?.name), user, step }) + "\n")
 
     const id = `mock-${Date.now()}`
     if (!body.stream) {

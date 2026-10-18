@@ -15,6 +15,7 @@ import { refusal, store, type SlackFile } from "./attachments.ts";
 import { commandOf, control, SERVER_COMMANDS } from "./commands.ts";
 import type { Channel, Config } from "./config.ts";
 import type { Approval, Db } from "./db.ts";
+import { createFixLog } from "./fixlog.ts";
 import {
   cardText,
   describeStep,
@@ -23,9 +24,13 @@ import {
   startProgress,
   type Progress,
 } from "./progress.ts";
+import { attachment, sendFile, type OutgoingFile, type ToolSuccess } from "./upload.ts";
 
 const LIMIT = 3500;
 const EDIT_MS = 1000;
+// The progress card re-renders on this cadence so the spinner keeps moving between agent events. It
+// sits above EDIT_MS, so each tick clears the edit throttle and lands as one rate-limited chat.update.
+const SPIN_MS = 1200;
 
 export type SlackApi = {
   post: (channel: string, threadTs: string, text: string, blocks?: object[]) => Promise<string>;
@@ -39,6 +44,7 @@ export type SlackApi = {
     text: string,
   ) => Promise<void>;
   download: (url: string) => Promise<Response>;
+  upload: (channel: string, threadTs: string, file: OutgoingFile) => Promise<void>;
 };
 
 export type Incoming = {
@@ -68,6 +74,10 @@ type Run = {
   card?: string | undefined;
   cardEdit: number;
   cardTimer?: NodeJS.Timeout | undefined;
+  // The spinner's current frame and its ticking timer; cardShown is the last text sent, to skip no-op edits.
+  tick: number;
+  spinTimer?: NodeJS.Timeout | undefined;
+  cardShown?: string | undefined;
   trigger?: string | undefined;
 };
 
@@ -154,6 +164,7 @@ export function createRouter(
   const queues = new Map<string, Queue>();
   // The Slack message each session's next execution answers, until its execution starts.
   const triggers = new Map<string, string>();
+  const fixes = createFixLog(slack);
   let chain = Promise.resolve();
   // Run bridge tasks one at a time; a failed task is logged and never stops the chain.
   const later = (task: () => Promise<unknown>) => {
@@ -178,6 +189,7 @@ export function createRouter(
       parts: [],
       lastEdit: 0,
       cardEdit: 0,
+      tick: 0,
     };
     runs.set(sessionId, run);
     return run;
@@ -220,12 +232,30 @@ export function createRouter(
   // The card is posted when an execution starts, so it stays above the answer messages.
   async function startCard(run: Run) {
     run.progress = startProgress();
+    run.tick = 0;
     run.trigger = triggers.get(run.sessionId);
     triggers.delete(run.sessionId);
-    const text = cardText(run.progress);
+    const text = cardText(run.progress, undefined, run.tick);
     run.card = await slack.post(run.channelId, run.threadTs, text, blocks(text));
+    run.cardShown = text;
     db.addReply(run.card, run.sessionId, run.channelId);
     run.cardEdit = Date.now();
+    startSpin(run);
+  }
+
+  // Advance the spinner on a timer so the card animates even when no agent events arrive; paint
+  // throttles the edits, so a tick never outruns the Slack rate limit.
+  function startSpin(run: Run) {
+    stopSpin(run);
+    run.spinTimer = setInterval(() => {
+      run.tick += 1;
+      later(() => paint(run));
+    }, SPIN_MS);
+  }
+
+  function stopSpin(run: Run) {
+    if (run.spinTimer) clearInterval(run.spinTimer);
+    run.spinTimer = undefined;
   }
 
   async function paint(run: Run, force = false) {
@@ -239,19 +269,25 @@ export function createRouter(
     }
     clearTimeout(run.cardTimer);
     run.cardTimer = undefined;
-    const text = cardText(run.progress);
-    await slack.update(run.channelId, run.card, text, blocks(text));
+    const text = cardText(run.progress, undefined, run.tick);
+    // A spinner tick with no new activity (e.g. while waiting for approval) renders the same text:
+    // skip the edit so a frozen card never spends a chat.update, and a broken card is not retried.
+    if (text === run.cardShown) return;
+    run.cardShown = text;
     run.cardEdit = Date.now();
+    await slack.update(run.channelId, run.card, text, blocks(text));
   }
 
   // A run that used no tools needs no card, so it is deleted; otherwise it becomes a summary.
   async function endCard(run: Run, outcome: Outcome) {
     const { progress, card, trigger } = run;
+    stopSpin(run);
     clearTimeout(run.cardTimer);
     Object.assign(run, {
       progress: undefined,
       card: undefined,
       cardTimer: undefined,
+      cardShown: undefined,
       trigger: undefined,
     });
     if (trigger) {
@@ -279,9 +315,12 @@ export function createRouter(
       triggers.set(job.sessionId, job.messageTs);
       slack.react(job.channelId, job.messageTs, "eyes", true).catch(() => undefined);
       try {
+        // A /fix run's shell commands are recorded from before it starts until it settles.
+        if (job.command === "fix") fixes.start(job.sessionId, job.channelId, job.threadTs);
         if (job.command) await command(job.client, job.sessionId, job.command, job.text, job.files);
         else await prompt(job.client, job.sessionId, job.text, job.files);
       } catch (error) {
+        fixes.drop(job.sessionId);
         queue.running = undefined;
         triggers.delete(job.sessionId);
         await slack.react(job.channelId, job.messageTs, "eyes", false).catch(() => undefined);
@@ -365,6 +404,14 @@ export function createRouter(
     );
   }
 
+  // A file from slack_attach goes where an approval request would, so a subagent's reaches its parent's thread.
+  async function attach(client: Client, event: ToolSuccess) {
+    const id = event.data.metadata?.slackAttach;
+    if (typeof id !== "string") return;
+    const to = await threadOf(client, event.data.sessionID);
+    if (to) await sendFile(slack, to.channel_id, to.thread_ts, attachment(client, event, id));
+  }
+
   async function settle(row: Approval, note: string) {
     const text = `${row.summary}\n*${note}*`;
     if (row.message_ts) await slack.update(row.channel_id, row.message_ts, text, blocks(text));
@@ -382,7 +429,8 @@ export function createRouter(
   async function waiting(run: Run | undefined, tool: string | undefined) {
     if (!run?.progress || !tool) return;
     setStep(run.progress, tool, "wait");
-    await paint(run);
+    // Force the edit so the card pauses its spinner and shows the approval prompt at once.
+    await paint(run, true);
   }
 
   async function end(run: Run, outcome: Outcome, note?: string) {
@@ -424,6 +472,8 @@ export function createRouter(
       );
       return ask(event.data, client);
     }
+    if (event.type === "session.tool.success") await attach(client, event);
+    await fixes.see(event);
     // Succeeded, failed or interrupted: the project's next queued prompt may start.
     if (event.type.startsWith("session.execution.") && event.type !== "session.execution.started")
       release(event.data.sessionID);
@@ -532,8 +582,10 @@ export function createRouter(
     threadTs?: string,
   ) {
     const refuse = (text: string) => slack.ephemeral(channelId, userId, threadTs, text);
-    if (userId !== config.ownerUserId)
-      return refuse("Only the owner can approve or reject actions.");
+    // Approvers count only in their channel; the thread check below binds the request to it.
+    const approvers = config.channels[channelId]?.approvers ?? [];
+    if (userId !== config.ownerUserId && !approvers.includes(userId))
+      return refuse("Only the owner or this channel's approvers can approve or reject actions.");
     const button = buttonValue(value);
     if (!button) return console.error("click ignored: malformed button value");
     const { sessionId, requestId } = button;

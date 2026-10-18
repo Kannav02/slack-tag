@@ -79,7 +79,10 @@ async function harness(t: TestContext) {
   ];
   // OpenCode answers its first model lists with an empty catalog while it is still loading.
   const catalog = { emptyLists: 0 };
-  const slackErrors = { updateTs: "" };
+  const slackErrors = { updateTs: "", upload: false };
+  // Files the plugin RPC hands out, by "<session>/<id>", and every fetch and upload request.
+  const attachments: Record<string, Record<string, string>> = {};
+  const uploads: Record<string, unknown>[] = [];
   const unexpected: string[] = [];
   const replies: Record<string, unknown>[] = [];
   const reactions: string[] = [];
@@ -127,6 +130,18 @@ async function harness(t: TestContext) {
     if (path === "/files/note.txt") return res.end("uploaded note");
     if (path === "/api/rpc/slack-tag/status")
       return json({ output: { pluginVersion: "test", policyVersion: 3 } });
+    if (path === "/api/rpc/slack-tag/attachment") {
+      const { input } = z.object({ input: z.record(z.string(), z.string()) }).parse(args);
+      uploads.push({ path, ...input });
+      return json({ output: attachments[`${input.sessionID}/${input.id}`] ?? {} });
+    }
+    // Slack's external upload flow: get an upload URL, send the bytes there, complete in the thread.
+    if (/^\/(upload\/F1|api\/files\.(getUploadURLExternal|completeUploadExternal))$/.test(path)) {
+      uploads.push({ path, raw, ...anyCall.parse(args) });
+      if (path === "/upload/F1") return res.end("OK");
+      if (slackErrors.upload) return json({ ok: false, error: "missing_scope" });
+      return json({ ok: true, upload_url: `${base}/upload/F1`, file_id: "F1", files: [] });
+    }
     if (path === "/api/model") {
       if (catalog.emptyLists > 0) {
         catalog.emptyLists--;
@@ -397,6 +412,8 @@ async function harness(t: TestContext) {
     fetched,
     catalog,
     slackErrors,
+    attachments,
+    uploads,
     unexpected,
     logs: () => logs,
     until,
@@ -498,7 +515,9 @@ await test(
     click("approve", "UOTHER", prompted("per_approve"));
     await until(() =>
       messages.some(
-        (m) => m.method === "chat.postEphemeral" && /Only the owner can approve/.test(m.text ?? ""),
+        (m) =>
+          m.method === "chat.postEphemeral" &&
+          /Only the owner or this channel's approvers can approve/.test(m.text ?? ""),
       ),
     );
     assert.equal(replies.length, 0);
@@ -821,7 +840,8 @@ await test(
     await h.until(() => /Done/.test(card("400.1").last?.text ?? ""));
 
     const { post, last } = card("400.1");
-    assert.equal(post?.text, "*Working…*");
+    // The card opens with an animated "working" header: a spinner frame and a live elapsed clock.
+    assert.match(post?.text ?? "", /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \*Working…\* · \d+:\d\d$/);
     assert.match(last?.text ?? "", /^\*✓ Done\* · 4 steps · 0:0\d$/m);
     assert.deepEqual(last?.text?.split("\n").slice(1), [
       "✓ Read `README.md`",
@@ -836,9 +856,10 @@ await test(
       h.messages.findLast((m) => m.ts === answer[0]?.ts)?.text,
       "Let me check the readme first.\n\nTwo more checks.\n\nDone. The project has one readme and nothing else to report.",
     );
-    // Thirteen tool and approval events reached the bridge, but the card is only edited a few times.
+    // Thirteen tool and approval events reached the bridge, but the card is only edited a few times;
+    // the run finishes within one spinner tick, so the animation adds no edits of its own here.
     assert.ok(
-      h.messages.filter((m) => m.ts === post?.ts && m.method === "chat.update").length <= 3,
+      h.messages.filter((m) => m.ts === post?.ts && m.method === "chat.update").length <= 4,
     );
     assert.deepEqual(h.reactions, ["+eyes@400.1", "-eyes@400.1", "+white_check_mark@400.1"]);
     assert.equal(
@@ -896,14 +917,84 @@ await test(
   },
 );
 
+await test(
+  "the progress card animates on a timer while a turn runs, then stops once it ends",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t);
+    const spinner = /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \*Working…\* · \d+:\d\d$/m;
+    const edits = (ts: string) =>
+      h.messages.filter((m) => m.ts === ts && m.method === "chat.update");
+
+    h.send({ ts: "500.1" });
+    await h.until(() => h.prompts.length === 1);
+    const sessionID = h.sessions[0]?.id ?? "";
+
+    // The agent is working but sends no tool events: only the animation keeps the card alive.
+    h.emit("session.execution.started", sessionID);
+    await h.until(() =>
+      h.messages.some((m) => m.thread_ts === "500.1" && m.method === "chat.postMessage"),
+    );
+    const cardTs =
+      h.messages.find((m) => m.thread_ts === "500.1" && m.method === "chat.postMessage")?.ts ?? "";
+    assert.match(h.messages.find((m) => m.ts === cardTs)?.text ?? "", spinner);
+
+    // With no further agent events, only the spinner timer keeps the card alive. Wait (up to the
+    // test timeout, so a loaded CI machine just waits longer instead of failing) for it to tick
+    // at least twice rather than asserting a fixed count over a fixed wall-clock window.
+    await h.until(() => edits(cardTs).length >= 2);
+    // Over a bounded window it stays throttled: the spinner timer never floods chat.update.
+    const before = edits(cardTs).length;
+    await delay(3000);
+    const burst = edits(cardTs).length - before;
+    assert.ok(burst <= 5, `the animation should stay rate-limited, saw ${burst} edits in 3s`);
+    const during = edits(cardTs);
+    // The spinner advanced: the header is not frozen on one frame, and every edit is a live frame.
+    assert.ok(
+      new Set(during.map((m) => (m.text ?? "").split("\n")[0])).size >= 2,
+      "the spinner/elapsed header should change between edits",
+    );
+    for (const m of during) assert.match(m.text ?? "", spinner);
+
+    // One tool runs and the turn ends: the spinner is replaced by the finished result in place.
+    h.emit("session.tool.input.started", sessionID, undefined, {
+      sessionID,
+      id: "s1",
+      name: "read",
+    });
+    h.emit("session.tool.called", sessionID, undefined, {
+      sessionID,
+      id: "s1",
+      input: { path: "/project/README.md" },
+    });
+    h.emit("session.tool.success", sessionID, undefined, { sessionID, id: "s1" });
+    h.emit("session.execution.succeeded", sessionID);
+    await h.until(() => /✓ Done/.test(edits(cardTs).at(-1)?.text ?? ""));
+    const done = edits(cardTs).at(-1)?.text ?? "";
+    assert.match(done, /^\*✓ Done\* · 1 step · \d+:\d\d$/m);
+    assert.match(done, /✓ Read `README.md`/);
+    assert.doesNotMatch(done, /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+
+    // The timer was cleared on completion: the finished card is never edited again.
+    const settled = edits(cardTs).length;
+    await delay(3500);
+    assert.equal(edits(cardTs).length, settled, "a finished card must not keep animating");
+    assert.equal(
+      h.db.prepare("SELECT state FROM replies WHERE message_ts = ?").get(cardTs)?.state,
+      "done",
+    );
+    assert.deepEqual(h.unexpected, []);
+  },
+);
+
 await test("a failed progress update still posts and persists an approval", async (t) => {
   const h = await harness(t);
   h.send({ ts: "400.1" });
   await h.until(() => h.prompts.length === 1);
   const sessionID = h.sessions[0]?.id ?? "";
   h.emit("session.execution.started", sessionID);
-  await h.until(() => h.messages.some((m) => m.text === "*Working…*"));
-  const card = h.messages.find((m) => m.text === "*Working…*");
+  await h.until(() => h.messages.some((m) => /\*Working…\*/.test(m.text ?? "")));
+  const card = h.messages.find((m) => /\*Working…\*/.test(m.text ?? ""));
   assert.ok(card);
   h.emit("session.tool.input.started", sessionID, undefined, {
     sessionID,
@@ -1086,3 +1177,243 @@ await test(
     }
   },
 );
+
+await test("slack_attach files reach the thread redacted; a failed upload only posts a note", async (t) => {
+  const h = await harness(t);
+  h.send({ ts: "500.1" });
+  await h.until(() => h.prompts.length === 1);
+  const sessionID = h.sessions[0]?.id ?? "";
+  const tool = (type: string, session: string, data: object) =>
+    h.emit(`session.tool.${type}`, session, undefined, { sessionID: session, id: "c1", ...data });
+  const log = "tests passed\npw-synthetic-secret xoxb-synthetic-secret\n";
+  const caption = "Log for <!channel> pw-synthetic-secret";
+  const data = Buffer.from(log).toString("base64");
+  h.attachments[`${sessionID}/a1`] = { name: "test.log", data, caption };
+  h.emit("session.execution.started", sessionID);
+  tool("input.started", sessionID, { name: "slack_attach" });
+  tool("called", sessionID, { input: { path: "/project/out/test.log", caption } });
+  tool("success", sessionID, { metadata: { slackAttach: "a1" } });
+  await h.until(() => h.uploads.some((u) => u.path === "/api/files.completeUploadExternal"));
+  const [fetch, url, upload, done] = h.uploads;
+  assert.deepEqual(fetch, { path: "/api/rpc/slack-tag/attachment", sessionID, id: "a1" });
+  const redacted = "tests passed\n[redacted] [redacted]\n";
+  assert.deepEqual([url?.filename, url?.length], ["test.log", String(redacted.length)]);
+  assert.ok(String(upload?.raw).includes(redacted));
+  assert.deepEqual([done?.channel_id, done?.thread_ts], ["CTEST", "500.1"]);
+  assert.equal(done?.initial_comment, "Log for @\u200bchannel [redacted]");
+  assert.ok(!JSON.stringify(h.uploads).includes("synthetic-secret"));
+
+  // A subagent's file goes to its parent's thread. Neither Slack refusing the upload nor an
+  // expired attachment stops the run: each posts a note.
+  h.slackErrors.upload = true;
+  const png = Buffer.from("89504e470d0a1a0a", "hex").toString("base64");
+  h.attachments["ses_child/a2"] = { name: "shot.png", data: png };
+  tool("success", "ses_child", { metadata: { slackAttach: "a2" } });
+  tool("success", sessionID, { metadata: { slackAttach: "expired" } });
+  const notes = () => h.messages.filter((m) => /could not be attached/.test(m.text ?? ""));
+  await h.until(() => notes().length === 2);
+  assert.ok(notes().every((m) => m.thread_ts === "500.1"));
+  assert.ok(h.uploads.some((u) => u.filename === "shot.png"));
+  assert.match(h.logs(), /missing_scope[^]*expired or was already sent/);
+  h.emit("session.text.delta", sessionID, "Here it is.");
+  h.emit("session.execution.succeeded", sessionID);
+  const card = () => h.messages.findLast((m) => m.text?.startsWith("*✓ Done*"))?.text ?? "";
+  await h.until(card);
+  assert.match(card(), /\n✓ Attached `out\/test\.log`$/);
+  assert.ok(h.reactions.includes("+white_check_mark@500.1"));
+  assert.deepEqual(h.unexpected, []);
+});
+
+await test(
+  "a channel's approvers decide its approval requests; other members and other channels' approvers cannot",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t);
+    // Restart with UAPPROVER for this channel and UELSEWHERE only for another, unreachable one.
+    await h.stop();
+    const path = join(h.state, "config.json");
+    const config = JSON.parse(await readFile(path, "utf8")) as { channels: Record<string, object> };
+    config.channels.CTEST = { ...config.channels.CTEST, approvers: ["UAPPROVER"] };
+    config.channels.COTHER = {
+      name: "other",
+      projectDir: join(h.state, "..", "other"),
+      opencodeUrl: "http://127.0.0.1:9",
+      passwordFile: join(h.state, "other.env"),
+      model: "test/test",
+      approvers: ["UELSEWHERE"],
+    };
+    await writeFile(join(h.state, "other.env"), "SLACK_TAG_PASSWORD=other-secret\n");
+    await writeFile(path, JSON.stringify(config));
+    await h.start();
+
+    // A teammate's run needs approval.
+    h.send({ ts: "500.1", user: "UOTHER" });
+    await h.until(() => h.prompts.length === 1);
+    const sessionID = h.sessions[0]?.id ?? "";
+    h.permission("per_team", sessionID, "rm -rf build");
+    await h.until(() => h.prompted("per_team"));
+    const approval = h.prompted("per_team");
+    assert.ok(approval);
+
+    // A plain member and another channel's approver are refused privately, and nothing is decided.
+    h.click("reject", "UOTHER", approval);
+    h.click("approve", "UELSEWHERE", approval);
+    const refusals = () => h.messages.filter((m) => m.method === "chat.postEphemeral");
+    await h.until(() => refusals().length === 2);
+    const refusal = "Only the owner or this channel's approvers can approve or reject actions.";
+    for (const user of ["UOTHER", "UELSEWHERE"])
+      assert.equal(refusals().find((m) => m.user === user)?.text, refusal);
+    assert.equal(h.replies.length, 0);
+    assert.equal(h.messages.filter((m) => m.ts === approval.ts).length, 1);
+    assert.equal(
+      h.db.prepare("SELECT state FROM approvals WHERE request_id = ?").get("per_team")?.state,
+      "pending",
+    );
+
+    // This channel's approver decides, and the request message names them.
+    h.click("approve", "UAPPROVER", approval);
+    await h.until(() => h.replies.length === 1);
+    assert.deepEqual(h.replies[0], { sessionID, requestID: "per_team", decision: "once" });
+    await h.until(() => h.messages.some((m) => m.ts === approval.ts && m.method === "chat.update"));
+    assert.match(
+      h.messages.findLast((m) => m.ts === approval.ts)?.text ?? "",
+      /\*Approved once by <@UAPPROVER>\*$/,
+    );
+
+    // The owner still decides.
+    h.permission("per_owner", sessionID, "git reset --hard");
+    await h.until(() => h.prompted("per_owner"));
+    h.click("reject", "UOWNER", h.prompted("per_owner"));
+    await h.until(() => h.replies.length === 2);
+    assert.deepEqual(h.replies[1], { sessionID, requestID: "per_owner", decision: "reject" });
+    assert.deepEqual(h.unexpected, []);
+  },
+);
+
+await test("approvers that are not Slack user IDs stop startup", { timeout: 20_000 }, async (t) => {
+  const work = await mkdtemp(join(tmpdir(), "slack-tag-approvers-"));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const config = join(work, "state", "config.json");
+  await mkdir(join(work, "state"));
+  // Not a list, an empty ID, a handle instead of an ID, and a number.
+  for (const approvers of ["UALICE", [""], ["@alice"], [7]]) {
+    const channel = {
+      name: "a",
+      projectDir: join(work, "project"),
+      opencodeUrl: "http://127.0.0.1:9",
+      passwordEnv: "A_PASSWORD",
+      model: "test/test",
+      approvers,
+    };
+    await writeFile(config, JSON.stringify({ ownerUserId: "UOWNER", channels: { CA: channel } }));
+    // A_PASSWORD stays unset, so even an accepted config stops before reaching Slack or OpenCode.
+    const child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", "--experimental-sqlite", join(root, "bridge/src/main.ts")],
+      {
+        cwd: root,
+        env: {
+          PATH: process.env.PATH,
+          SLACK_TAG_CONFIG: config,
+          SLACK_BOT_TOKEN: "xoxb-test",
+          SLACK_APP_TOKEN: "xapp-test",
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    const errors = text(child.stderr);
+    await once(child, "exit");
+    assert.notEqual(child.exitCode, 0);
+    assert.match(await errors, /channel CA approvers must be a list of Slack user IDs/);
+  }
+});
+
+await test("/fix runs the plugin's command and uploads the shell commands its own session ran", async (t) => {
+  const h = await harness(t);
+  h.send({ ts: "600.1", text: "<@UBOT> /fix the login test fails" });
+  await h.until(() => h.calls.length === 1);
+  const sessionID = h.sessions[0]?.id ?? "";
+  assert.deepEqual(h.calls[0], {
+    type: "command",
+    sessionID,
+    name: "fix",
+    text: "the login test fails",
+    files: [],
+    delivery: "queue",
+  });
+  // Shapes from real OpenCode 2.0.15 (spike/v2/fix-check.mjs): a non-zero exit is a success with an exit code.
+  const tool = (session: string, id: string, type: string, data: object) =>
+    h.emit(`session.tool.${type}`, session, undefined, { sessionID: session, id, ...data });
+  const shell = (session: string, id: string, command: string) => {
+    tool(session, id, "input.started", { name: "shell" });
+    tool(session, id, "called", { input: { command } });
+  };
+  const exit = (code: number, ...text: string[]) => ({
+    content: text.map((part) => ({ type: "text", text: part })),
+    metadata: { status: "completed", truncated: false, exit: code },
+  });
+  h.emit("session.execution.started", sessionID);
+  shell(sessionID, "c1", "npm test");
+  tool(sessionID, "c1", "success", exit(1, "FAIL login\n", "Exited with code 1"));
+  tool(sessionID, "c2", "input.started", { name: "read" });
+  tool(sessionID, "c2", "called", { input: { path: "/project/src/login.ts" } });
+  shell("ses_child", "c3", "echo from a subagent");
+  shell(sessionID, "c4", "echo pw-synthetic-secret");
+  tool(sessionID, "c4", "success", exit(0, "xoxb-synthetic-secret\n"));
+  shell(sessionID, "c5", "sudo true");
+  tool(sessionID, "c5", "failed", {
+    error: { type: "permission.rejected", message: "Blocked by the safety plugin" },
+  });
+  shell(sessionID, "c6", "npm test");
+  h.emit("session.execution.interrupted", sessionID);
+  await h.until(() => h.uploads.some((u) => u.path === "/api/files.completeUploadExternal"));
+  const [url, upload, done] = h.uploads;
+  const log = [
+    "Shell commands of this /fix run, recorded by the bridge from OpenCode's tool events, not from " +
+      "the model's reply. Each shows its result and the end of its output.",
+    "$ npm test\n[exit 1]\nFAIL login\nExited with code 1",
+    "$ echo [redacted]\n[exit 0]\n[redacted]",
+    "$ sudo true\n[failed: Blocked by the safety plugin]",
+    "$ npm test\n[no result before the run ended]\n",
+  ].join("\n\n");
+  assert.deepEqual([url?.filename, url?.length], ["fix-commands.log", String(log.length)]);
+  assert.ok(String(upload?.raw).includes(log));
+  assert.deepEqual(
+    [done?.channel_id, done?.thread_ts, done?.initial_comment],
+    ["CTEST", "600.1", "Commands Jeff ran for /fix"],
+  );
+
+  // A /fix run without shell commands, then a plain prompt in the same session, upload nothing.
+  h.send({ ts: "600.2", thread_ts: "600.1", text: "<@UBOT> /fix" });
+  await h.until(() => h.calls.length === 2);
+  assert.deepEqual([h.calls[1]?.name, h.calls[1]?.text], ["fix", ""]);
+  h.emit("session.execution.started", sessionID);
+  tool(sessionID, "c7", "input.started", { name: "read" });
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.reactions.includes("+white_check_mark@600.2"));
+  h.send({ ts: "600.3", thread_ts: "600.1", text: "run the tests" });
+  await h.until(() => h.prompts.length === 1);
+  h.emit("session.execution.started", sessionID);
+  shell(sessionID, "c8", "npm test");
+  tool(sessionID, "c8", "success", exit(0, "ok\n"));
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.reactions.includes("+white_check_mark@600.3"));
+  assert.equal(h.uploads.length, 3);
+
+  // The log keeps the last 200 commands and the end of each output.
+  h.send({ ts: "600.4", thread_ts: "600.1", text: "<@UBOT> /fix the build" });
+  await h.until(() => h.calls.length === 3);
+  for (let i = 0; i <= 200; i++) shell(sessionID, `d${i}`, `echo ${i}`);
+  tool(sessionID, "d200", "success", exit(0, `start ${"x".repeat(3000)} end`));
+  h.emit("session.execution.succeeded", sessionID);
+  await h.until(() => h.uploads.length === 6);
+  const capped = String(h.uploads[4]?.raw);
+  assert.ok(capped.includes("(Earlier commands not shown: 1.)\n\n$ echo 1\n"));
+  assert.ok(capped.includes(`\n\n$ echo 200\n[exit 0]\n…${"x".repeat(1996)} end\n`));
+
+  // Arguments with !`…` stay a prompt, so a project's own fix command never runs them on the server.
+  h.send({ ts: "600.5", thread_ts: "600.1", text: "<@UBOT> /fix !`id`" });
+  await h.until(() => h.prompts.length === 2);
+  assert.equal(h.prompts[1]?.text, "<@UOWNER>: /fix !`id`");
+  assert.deepEqual(h.unexpected, []);
+});

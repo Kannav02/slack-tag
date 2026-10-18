@@ -1,5 +1,7 @@
 import { createServer, request as httpRequest } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { text } from "node:stream/consumers";
 
 // Credentials exist only in this sidecar. The agent can use one repository's smart HTTP API.
 const repository = process.env.GITHUB_REPOSITORY ?? "";
@@ -16,8 +18,64 @@ const services = [
   "git-upload-pack",
   ...(process.env.GIT_ALLOW_PUSH === "1" ? ["git-receive-pack"] : []),
 ];
+// With GIT_ALLOW_PULL_REQUESTS=1 it may also open or find that repository's jeff/* pull requests.
+const pullRequests = process.env.GIT_ALLOW_PULL_REQUESTS === "1";
+// The local fixture serves the REST API too; production uses GitHub's API host.
+const api = upstream.origin === "https://github.com" ? new URL("https://api.github.com") : upstream;
+const pulls = `/repos/${repository}/pulls`;
+const owner = repository.split("/")[0]!;
+const headers = { "content-type": "application/json", "user-agent": "slack-tag-git-proxy" };
+const isRef = (ref: unknown, prefix = ""): ref is string =>
+  typeof ref === "string" && ref.startsWith(prefix) && /^[\w-]+(?:[./][\w-]+)*$/.test(ref);
+
+// Only these calls: read the default branch, find the open PR for a jeff/* head, open one.
+function pullRequestCall(method = "", url = "", payload = ""): [string, string?] | undefined {
+  if (method === "GET" && url === `/repos/${repository}`) return [url];
+  if (method === "GET" && url.startsWith(`${pulls}?`)) return lookup(url.slice(pulls.length + 1));
+  if (method === "POST" && url === pulls) return create(payload);
+}
+
+function lookup(search: string): [string] | undefined {
+  const query = new URLSearchParams(search);
+  const head = query.get("head") ?? "";
+  if (query.size !== 2 || query.get("state") !== "open" || !head.startsWith(`${owner}:`)) return;
+  if (isRef(head.slice(owner.length + 1), "jeff/"))
+    return [`${pulls}?${new URLSearchParams({ head, state: "open" })}`];
+}
+
+// Rebuilt from checked fields, so nothing else (such as issue conversion) reaches GitHub.
+function create(payload: string): [string, string] | undefined {
+  try {
+    const { title, body, head, base } = JSON.parse(payload) as Record<string, unknown>;
+    const strings = typeof title === "string" && typeof body === "string";
+    if (strings && isRef(head, "jeff/") && isRef(base) && head !== base)
+      return [pulls, JSON.stringify({ title, body, head, base })];
+  } catch {}
+}
+
+async function pullRequest(req: IncomingMessage, res: ServerResponse) {
+  if (req.method === "POST" && !(Number(req.headers["content-length"]) <= 65_536))
+    return void res.writeHead(413).end("request body too large");
+  const call = pullRequestCall(req.method, req.url, req.method === "POST" ? await text(req) : "");
+  if (!call) return void res.writeHead(403).end("pull request operation denied");
+  // Fresh headers, so caller credentials never reach GitHub; redirects are never followed.
+  const reply = await fetch(new URL(call[0], api), {
+    method: req.method!,
+    headers: { ...headers, authorization: `Bearer ${token}` },
+    body: call[1] ?? null,
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => undefined);
+  if (reply?.status !== 200 && reply?.status !== 201)
+    return void res.writeHead(502).end(`GitHub API failed (${reply?.status ?? "no reply"})`);
+  // Only the fields the tool reads: repository JSON can carry a temporary clone token.
+  const fields = JSON.stringify(await reply.json(), ["default_branch", "html_url", "number"]);
+  res.writeHead(reply.status, { "content-type": "application/json" }).end(fields);
+}
 
 const server = createServer((req, res) => {
+  if (pullRequests && req.url?.startsWith("/repos/"))
+    return void pullRequest(req, res).catch(() => res.destroy());
   const encoding = req.headers["content-encoding"];
   if (encoding && encoding !== "gzip") return void res.writeHead(415).end("unsupported encoding");
   const service = services.find((s) =>

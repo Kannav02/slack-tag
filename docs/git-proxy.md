@@ -80,6 +80,7 @@ Request and successful response bodies are piped through as streams. The proxy d
 | Local Git commands | Run inside the sandbox; no proxy request. |
 | Fetch, clone, or the fetch part of pull | Use the mapped repository's `git-upload-pack` endpoints. |
 | Normal push | Uses `git-receive-pack`; permitted only when `GIT_ALLOW_PUSH=1`. |
+| Open or find a pull request | `GET /repos/<owner>/<repo>` (default branch), `GET …/pulls?head=<owner>:jeff/<slug>&state=open` and `POST …/pulls` from a `jeff/*` head into a different base, forwarded to `https://api.github.com` with only title, body, head and base; permitted only when `GIT_ALLOW_PULL_REQUESTS=1`. |
 | Different repository or unsupported endpoint | Rejected with `403`. |
 | Upstream redirect or non-200 response | Not followed; returns a generic `502`. |
 
@@ -88,6 +89,10 @@ The sidecar has no published host port and joins its project's Docker network. F
 The URL rewrite is routing configuration, not a universal network interception mechanism. General outbound networking remains available; bypassing the proxy does not give the agent the host credential. LFS, submodule workflows and other repositories require separate support.
 
 Shell approval policy is separate from this service. It blocks explicit force-push command variants; the proxy does not inspect commit ancestry. As deployed on 2026-10-14, the owner accepted command-policy-only protection and enabled normal pushes because GitHub's current private-repository plan does not support the requested server rules. Direct Git protocol requests could bypass that command check.
+
+## Pull requests
+
+The safety plugin's `open_pull_request` tool (`plugin/src/pull-request.ts`) uses these calls through `GIT_PROXY_URL`, which the Compose overrides give the agent container. It reads the session's branch and `origin` with read-only Git, refuses the default branch and branches outside `jeff/`, and returns the branch's open pull request or opens one into the default branch. It asks no one: OpenCode plugin tools never reach the permission hook. The agent can also call the proxy directly, so the proxy's checks are the boundary. The host GitHub account (Kannav02) authors the pull requests. Bodies over 64 KiB get `413`, GitHub errors become a `502` naming only the status, and replies carry only `default_branch`, `html_url` and `number` (repository JSON can include a temporary clone token). `tests/pull-request.integration.test.ts` covers these calls; there `GIT_UPSTREAM` (127.0.0.1 only) serves both Git and the REST API.
 
 ## Deployment and verification
 

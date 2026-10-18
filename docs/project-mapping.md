@@ -17,7 +17,7 @@ Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner repl
 
 ## Where the mapping lives
 
-- `/var/lib/slack-tag/config.json`: Slack channel ID → project host path (`projectDir`), container path (`serverDir`), server URL (`opencodeUrl`), and model. The bridge reads this at startup.
+- `/var/lib/slack-tag/config.json`: Slack channel ID → project host path (`projectDir`), container path (`serverDir`), server URL (`opencodeUrl`), and model, plus an optional `approvers` list of Slack user IDs who may approve or reject that channel's actions besides the owner (registration never sets it). The bridge reads this at startup.
 - `/var/lib/slack-tag/slack-tag.sqlite`: Slack workspace ID + channel ID + thread timestamp → OpenCode session ID.
 - Each container's persistent `/data` volume: OpenCode's conversation data. Retain both this volume and SQLite to resume conversations after restarts.
 - `/var/lib/slack-tag/inbox/<channel name>/<thread_ts>/`: Slack uploads. Only the bridge writes here; the container sees it read-only at `/inbox`.

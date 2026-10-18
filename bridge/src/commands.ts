@@ -11,8 +11,8 @@ import type { Channel } from "./config.ts";
 
 export type Command = { name: string; args: string };
 
-// `init` and `review` run as OpenCode server commands; the others are handled by the bridge.
-export const SERVER_COMMANDS = new Set(["init", "review"]);
+// `init`, `review` and the safety plugin's `fix` run as OpenCode server commands; the bridge handles the rest.
+export const SERVER_COMMANDS = new Set(["init", "review", "fix"]);
 const NAMES = new Set([...SERVER_COMMANDS, "model", "stop", "compact"]);
 const NO_SESSION = "No session in this thread yet. Mention OpenCode with a request first.";
 const LOADING = "OpenCode's model list is still loading. Try `/model` again in a moment.";
@@ -21,9 +21,10 @@ const escape = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // Only known names are commands, so a prompt that starts with a path such as `/etc/hosts` stays a prompt.
+// Arguments with !`…` stay a prompt too: a project's own command of the same name would run them on the server.
 export function commandOf(text: string): Command | undefined {
   const match = text.trim().match(/^\/([a-z]+)(?:\s+([\s\S]*))?$/);
-  if (!match || !NAMES.has(match[1]!)) return;
+  if (!match || !NAMES.has(match[1]!) || match[2]?.includes("!`")) return;
   return { name: match[1]!, args: (match[2] ?? "").trim() };
 }
 
