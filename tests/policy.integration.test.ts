@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import plugin from "../plugin/index.ts";
 
 type Setup = Parameters<typeof plugin.setup>[0];
-type PermissionInput = { sessionID: string; action: string; resources: unknown[]; effect: string };
+type PermissionInput = {
+  sessionID: string;
+  action: string;
+  resources: unknown[];
+  metadata?: Record<string, unknown>;
+  effect: string;
+  message?: string;
+};
 
-// Load the plugin as OpenCode does and call its permission hook with representative requests.
-await test("permission hook allows safe work, asks for the rest, and denies force push, sudo and download-and-run", async () => {
+// Load the plugin as OpenCode does and return its permission hook.
+async function permissionHook() {
   const hooks = new Map<string, (input: PermissionInput) => void>();
   // Only the parts of OpenCode's plugin host that the plugin uses.
   const host = {
@@ -22,6 +32,12 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   await plugin.setup(host as unknown as Setup);
   const evaluate = hooks.get("evaluate");
   assert.ok(evaluate);
+  return evaluate;
+}
+
+// Call the permission hook with representative requests.
+await test("permission hook allows safe work, asks for the rest, and denies force push, sudo and download-and-run", async () => {
+  const evaluate = await permissionHook();
   const effect = (action: string, ...resources: unknown[]) => {
     const input: PermissionInput = { sessionID: "ses_1", action, resources, effect: "allow" };
     evaluate(input);
@@ -161,6 +177,65 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("external_directory", "/etc"), "ask");
   assert.equal(effect("shell"), "ask");
   assert.equal(effect("edit", null), "ask");
+});
+
+// Request shapes recorded from real OpenCode 2.0.15: external_directory sends "<dir>/*" before the
+// tool's own request, and glob and grep send their pattern as the resource and the folder as metadata.
+await test("permission hook refuses built-in reads of the server's /proc and /data without asking", async () => {
+  const evaluate = await permissionHook();
+  const decide = (action: string, resources: unknown[], path?: string) => {
+    const input: PermissionInput = {
+      sessionID: "ses_1",
+      action,
+      resources,
+      effect: "allow",
+      ...(path === undefined ? {} : { metadata: { path } }),
+    };
+    evaluate(input);
+    return input;
+  };
+  const project = await mkdtemp(join(tmpdir(), "slack-tag-policy-"));
+  await symlink("/proc/self", join(project, "self"));
+
+  for (const [action, resources, path] of [
+    ["external_directory", ["/proc/self/*"]],
+    ["external_directory", ["/proc/1/*"]],
+    ["external_directory", ["/data/*"]],
+    ["external_directory", ["/data/state/opencode/*"]],
+    ["read", ["/proc/self/environ"]],
+    ["read", ["/proc/1/environ"]],
+    ["read", ["/project/../proc/self/environ"]],
+    ["read", ["/project/./../proc/1/environ"]],
+    ["read", ["../".repeat(40) + "proc/self/environ"]],
+    ["read", ["/data/share/opencode/opencode.db"]],
+    ["read", ["/data"]],
+    ["read", [join(project, "self", "environ")]],
+    ["list", ["/proc"]],
+    ["glob", ["*"], "/proc/self"],
+    ["glob", ["*"], "/data/state"],
+    ["grep", ["PASSWORD"], "/proc/self/environ"],
+    ["grep", ["PASSWORD"], "/"],
+    ["grep", ["PASSWORD"], "/project/.."],
+  ] as [string, string[], string?][]) {
+    const input = decide(action, resources, path);
+    assert.equal(input.effect, "deny", `${action} ${resources.join(" ")} ${path ?? ""}`);
+    assert.match(input.message ?? "", /Server-only path/);
+  }
+
+  // Project reads and searches still run, including searches for text that looks like a server path.
+  assert.equal(decide("read", ["/project/src/a.ts"]).effect, "allow");
+  assert.equal(decide("read", ["src/a.ts"]).effect, "allow");
+  assert.equal(decide("read", ["/project/data/seed.json"]).effect, "allow");
+  assert.equal(decide("read", ["/database/x"]).effect, "allow");
+  assert.equal(decide("glob", ["**/*.ts"], "/project").effect, "allow");
+  assert.equal(decide("grep", ["/proc/self/environ"], ".").effect, "allow");
+  assert.equal(decide("grep", ["TODO"]).effect, "allow");
+  // Other external folders still ask the owner; the read after approval runs as before.
+  assert.equal(decide("external_directory", ["/etc/*"]).effect, "ask");
+  assert.equal(decide("external_directory", ["/project/../etc/*"]).effect, "ask");
+  assert.equal(decide("read", ["/etc/hostname"]).effect, "allow");
+  assert.equal(decide("glob", ["*"], "/").effect, "allow");
+  await rm(project, { recursive: true });
 });
 
 await test("context hook tells the model the session is multiplayer", async () => {
