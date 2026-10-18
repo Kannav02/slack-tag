@@ -23,6 +23,7 @@ import {
   startProgress,
   type Progress,
 } from "./progress.ts";
+import { attachment, sendFile, type OutgoingFile, type ToolSuccess } from "./upload.ts";
 
 const LIMIT = 3500;
 const EDIT_MS = 1000;
@@ -39,6 +40,7 @@ export type SlackApi = {
     text: string,
   ) => Promise<void>;
   download: (url: string) => Promise<Response>;
+  upload: (channel: string, threadTs: string, file: OutgoingFile) => Promise<void>;
 };
 
 export type Incoming = {
@@ -365,6 +367,14 @@ export function createRouter(
     );
   }
 
+  // A file from slack_attach goes where an approval request would, so a subagent's reaches its parent's thread.
+  async function attach(client: Client, event: ToolSuccess) {
+    const id = event.data.metadata?.slackAttach;
+    if (typeof id !== "string") return;
+    const to = await threadOf(client, event.data.sessionID);
+    if (to) await sendFile(slack, to.channel_id, to.thread_ts, attachment(client, event, id));
+  }
+
   async function settle(row: Approval, note: string) {
     const text = `${row.summary}\n*${note}*`;
     if (row.message_ts) await slack.update(row.channel_id, row.message_ts, text, blocks(text));
@@ -424,6 +434,7 @@ export function createRouter(
       );
       return ask(event.data, client);
     }
+    if (event.type === "session.tool.success") await attach(client, event);
     // Succeeded, failed or interrupted: the project's next queued prompt may start.
     if (event.type.startsWith("session.execution.") && event.type !== "session.execution.started")
       release(event.data.sessionID);
@@ -532,8 +543,10 @@ export function createRouter(
     threadTs?: string,
   ) {
     const refuse = (text: string) => slack.ephemeral(channelId, userId, threadTs, text);
-    if (userId !== config.ownerUserId)
-      return refuse("Only the owner can approve or reject actions.");
+    // Approvers count only in their channel; the thread check below binds the request to it.
+    const approvers = config.channels[channelId]?.approvers ?? [];
+    if (userId !== config.ownerUserId && !approvers.includes(userId))
+      return refuse("Only the owner or this channel's approvers can approve or reject actions.");
     const button = buttonValue(value);
     if (!button) return console.error("click ignored: malformed button value");
     const { sessionId, requestId } = button;

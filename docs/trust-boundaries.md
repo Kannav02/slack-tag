@@ -50,14 +50,15 @@ flowchart LR
 | Credentials `/etc/slack-tag` | root, files `0600`; systemd reads `bridge.env` before dropping to `slack-tag` | `bridge.env` (Slack tokens, one password per hand-made channel), `<project>.env` (that server's password), `proxy.env` (model key). |
 | OpenCode container | Starts as root, `start-server` drops the server to `node` (uid 1000); `agent-shell` runs agent shells as `agent` (uid 1001). gVisor (`runsc`) by default. | `opencode serve` with the project at `/project`, uploads at `/inbox` (read-only) and its own `/data` volume. Hand-made channels use `deploy/compose.yaml`; registered ones use `deploy/project.yaml`. |
 | key-proxy container | uid 1000, read-only, no capabilities | Swaps the placeholder key for the real model key and forwards only to `https://opencode.ai/zen/go/v1`. One per registered project; one shared by hand-made projects. |
-| Safety plugin (`plugin/`) | Inside the server process | Decides permission requests (policy version 3), strips secrets from agent shells, reports its policy version over RPC. |
+| Safety plugin (`plugin/`) | Inside the server process | Decides permission requests (policy version 3), strips secrets from agent shells, reports its policy version over RPC, and provides the `slack_attach` tool, whose files the bridge fetches over RPC. |
+| git-proxy container (optional) | uid 1000, read-only, no capabilities | Holds the host GitHub token; forwards one repository's Git traffic and, when enabled, its pull request calls. See [Git proxy](git-proxy.md). |
 | Host firewall (`deploy/firewall.sh`) | root, `slack-tag-firewall.service` | Drops traffic from `st-*` bridges to `169.254.0.0/16` and to the host itself. |
 
 One channel maps to one project and one server; each thread is one session on it. Threads in a channel share the same files, and the bridge runs one prompt or server command at a time per project. See [project mapping](project-mapping.md).
 
 ## Trust zones
 
-1. **Owner and members**: workspace members may prompt mapped projects and run Slack commands; only the owner (`ownerUserId`) may register projects and approve actions.
+1. **Owner, approvers and members**: workspace members may prompt mapped projects and run Slack commands; only the owner (`ownerUserId`) may register projects; the owner and a channel's `approvers` may approve or reject actions in that channel.
 2. **Slack**: delivers events and file URLs. Trusted to say who sent a message.
 3. **Bridge host**: the bridge, its state and credentials, Docker. Fully trusted.
 4. **OpenCode server**: holds its own server password; trusted to enforce the plugin's decisions.
@@ -73,7 +74,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Workspace members' messages can start or continue sessions in mapped channels. | **Tested**, **Live** for the owner path; two-user live test pending |
 | Member replies in a mapped thread continue without a mention. | **Tested**, **Live** for the owner path |
 | The bridge reads its workspace from `auth.test` and ignores events, approval clicks and folder choices from any other workspace. | **Tested** (SEC-3) |
-| Only the owner can register a project or click approval buttons. | **Tested**, **Live** for the owner path |
+| Only the owner can register a project. Approval buttons accept the owner and the users in that channel's `approvers`; anyone else, including another channel's approvers, gets a private refusal and the request stays pending. | **Tested**, **Live** for the owner path |
 | Approval button values are parsed defensively and must come from the thread where the bridge asked; malformed or misplaced clicks are ignored. | **Tested** (SEC-3) |
 | The bot token is sent only to `https://files.slack.com`; redirects to any other origin are refused. | **Tested** (SEC-3) |
 
@@ -84,6 +85,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Slack tokens and every channel's server password are redacted in posts, updates, ephemerals and nested block text. | **Tested** (SEC-3) |
 | `<!channel>`, `<!here>`, `@everyone` and similar in agent output are neutralised. | **Tested** (SEC-3); how real Slack renders them is not verified |
 | Failures post a generic message; details go to the bridge log. Registration still shows the last 500 characters of a failed step's error. | **Tested** |
+| Files the agent posts with `slack_attach` go to its session's thread (a subagent's to its nearest mapped ancestor's) through Slack's external upload; the Slack SDK also sends the bot token to the upload URL Slack's API returns. Text files and captions get the same redaction; images cannot be redacted. A failed upload or an expired file posts a short note, and the run continues. | **Tested**; needs the `files:write` scope, not checked in real Slack |
 
 ### Bridge → OpenCode server
 
@@ -113,6 +115,8 @@ One channel maps to one project and one server; each thread is one session on it
 | Read-only image root, all capabilities dropped except `SETUID`/`SETGID` for the privilege drop, `no-new-privileges`, 2 GB memory, 512 processes. | **Real** (S5, SEC-5) |
 | Only the project folder, its read-only inbox and its own `/data` are visible; other projects, the host and the bridge env are not. | **Real** (S5, SEC-1) |
 | `.opencode/`, `opencode.json(c)`, `.git/hooks` and `.git/config` are read-only, so the agent cannot change its own policy or plant Git hooks. | **Real** (S5, runc and gVisor) |
+| `.git/commondir` is a read-only `.` placeholder, so the agent cannot point the server's Git at a planted config with filter programs (#52). Git 2.43 works normally with it (status, diff, add, commit, stash, gc, fsck, worktrees). | **Tested** (real Git, disposable repo); container mount and separate-user check **not yet verified** |
+| Other files in `.git/` (`info/attributes`, `objects/info/alternates`, refs) remain writable from agent shells. Without config control they cannot name a program; renaming `.git` itself, which would move the read-only mounts with it, is unverified. | **Gap**: #52 follow-up |
 | Agent shells run as `agent` (uid 1001), so they cannot read the server's environment, memory or `/data`, and cannot approve their own permission requests. | **Real** (SEC-5) |
 | Everything else in the project, including `.env` files and `.git` history, is writable by the agent. | By design; damage is unrecoverable (**Gap**: SEC-6) |
 | No CPU or disk limits. | **Gap**: SEC-5 follow-up |
@@ -122,7 +126,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Control | Status |
 | --- | --- |
 | Policy version 3: reads, project edits and a named list of single shell commands run without asking; everything else, including chained or piped commands and web access, asks the owner in Slack. See `SPEC.md`. | **Tested**, **Real** (SEC-2) |
-| Always refused: `git push` in any form, `sudo`/`su`/`doas`, download-and-run, and edits to protected config. | **Tested** (SEC-2) |
+| Always refused: `git push` in any form, `sudo`/`su`/`doas`, download-and-run, and edits to protected config or anywhere in `.git` (normalized, so `..` cannot escape the check). | **Tested** (SEC-2, #52) |
 | No answer within the timeout, a plugin error, or a missing plugin never allows. | **Tested** (SEC-2) |
 | Requests from subagent sessions go to the nearest mapped ancestor's thread; requests with no mapped ancestor are rejected at once. | **Tested** (SEC-2) |
 | Subagent permission requests are not re-posted after a bridge restart. | **Gap**: SEC-2 follow-up |
@@ -134,7 +138,9 @@ One channel maps to one project and one server; each thread is one session on it
 | No Slack tokens in containers. | **Real** (S5) |
 | The real model key lives only in `key-proxy`; project containers get the placeholder `unused`. | **Real** (SEC-5 PR #6) |
 | Agent shells get no server password or `SLACK_` variable, and as uid 1001 cannot read the server's `/proc/<pid>/environ`. | **Real** (S1, S2, SEC-5) |
+| Built-in read, list, glob and grep tools run in the server process (uid 1000), so the plugin refuses them without asking when the path resolves (after `..`, relative paths and existing symlinks) under `/proc` (the server's environment) or `/data` (the server's `HOME` and session store). This covers `external_directory` requests there and grep over a parent such as `/`. Other external folders still ask. | **Tested**, **Real** (#51, OpenCode 2.0.15 outside a container) |
 | The agent can still use its project's key proxy to spend inference. | By design |
+| `slack_attach` needs no approval (OpenCode does not consult the permission hook for plugin tools). It reads through `agent-shell` as uid 1001 with a bare environment, so it posts only what the agent could read itself: a regular file of an allowed type (images checked by signature, text without NUL bytes), at most 10 MB, under the session folder, `/project` or `/tmp`, with no symlink on its path. The bridge never opens the project: it fetches each file once over the password-protected plugin RPC, only for the session that attached it, within 10 minutes. | **Real** (`spike/v2/attach.sh`; the image's users and capabilities reproduced in a mount namespace, not the Docker image or gVisor) |
 
 ### Agent → network
 
@@ -144,12 +150,30 @@ One channel maps to one project and one server; each thread is one session on it
 | `deploy/firewall.sh` drops traffic from `st-*` networks to the cloud metadata range `169.254.0.0/16` and to the host itself; replies to the bridge's own connections still pass. | **Real** (SEC-5, Docker-in-Docker) |
 | Other internet access stays open by decision (no egress allowlist). | By design (SEC-5, 2026-10-02) |
 
+### Agent → browser (screenshots)
+
+| Control | Status |
+| --- | --- |
+| `playwright screenshot` runs without approval only for an `http(s)://` URL on `localhost`, `127.0.0.1` or `[::1]`, with `--full-page`, `--viewport-size=`, `--wait-for-selector=`, `--wait-for-timeout=` or `--timeout=`, saving a `.png` under `/tmp` or the working folder (no `..` or dot folders). Other hosts, `file://`, other flags (`--save-har`, `--user-data-dir`, `--channel`, `-b`), other subcommands, `npx` or a path to another binary ask. The agent is told to use `/tmp` so screenshots are not committed. | **Tested**; **Real** (OpenCode 2.0.15 with the plugin and a scripted model) |
+| The browser is the image's root-owned Chromium headless shell, started through `agent-shell` as uid 1001 with no capabilities, so it reads and writes only what the agent can. Playwright runs it with `--no-sandbox` and `--disable-dev-shm-usage` (shared memory in the `/tmp` tmpfs); no capability, seccomp or `/dev/shm` change. | **Real** (runc, stand-in image with the compose flags); gVisor and the built image **Configured** |
+| The localhost check is not an egress boundary: a local page can load other sites, and the CLI opens a local file named like the URL as `file://` instead. Neither gives more than project code run by `npm test` already has. | By design (egress open, SEC-5) |
+
+### Agent → GitHub (Git proxy)
+
+| Control | Status |
+| --- | --- |
+| The agent container gets Git URL rewrites and `GIT_PROXY_URL`, never a token. The proxy forwards Git smart HTTP for its one repository; pushes need `GIT_ALLOW_PUSH=1`. | **Live** for fetch and push (2026-10-14, see findings); `GIT_PROXY_URL` **Configured**; Git coverage is issue #36 |
+| With `GIT_ALLOW_PULL_REQUESTS=1` the proxy also allows reading the default branch, finding the open pull request for a `jeff/*` head and opening one from a `jeff/*` head into a different base, forwarding only title, body, head and base. Other repositories, endpoints, query parameters and fields are refused. | **Tested**; **Real** through OpenCode 2.0.15 with a fake GitHub |
+| Caller credentials are replaced, redirects are not followed, bodies are capped at 64 KiB, GitHub errors become a generic `502` and replies keep only the default branch, pull request URL and number, so neither the token nor a temporary clone token reaches the agent or the logs. | **Tested** |
+| `open_pull_request` asks no one, because plugin tools never reach the permission hook. Its branch checks are a convenience; the proxy is the boundary, since the agent can call it directly. Pull requests are authored by the host account and may run the repository's pull request workflows, as pushes already can. | **Real**; by design |
+
 ## Secrets inventory
 
 | Secret | Stored in | Who can read it |
 | --- | --- | --- |
 | Slack bot and app tokens | `/etc/slack-tag/bridge.env` | root, the bridge process |
 | Model key (`OPENCODE_API_KEY`) | `/etc/slack-tag/proxy.env` | root, the key-proxy containers |
+| Host GitHub token | The host `gh` login, read at startup into the git-proxy container's environment | root, Docker, the git-proxy container |
 | Hand-made channel server passwords | `bridge.env` (as each channel's `passwordEnv`) and that project's env file | root, the bridge, that project's server (uid 1000) |
 | Registered project server passwords | `<state dir>/projects/<name>.env`, `0600` | The bridge user, that project's server |
 | Thread → session map | `slack-tag.sqlite` | The bridge user (state folder `0700`) |

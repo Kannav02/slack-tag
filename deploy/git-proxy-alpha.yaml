@@ -19,6 +19,7 @@ services:
     depends_on: [git-proxy]
     extra_hosts: ["git-proxy:172.30.1.254"]
     environment:
+      GIT_PROXY_URL: http://git-proxy:8081
       GIT_CONFIG_COUNT: "4"
       GIT_CONFIG_KEY_0: url.http://git-proxy:8081/.insteadOf
       GIT_CONFIG_VALUE_0: "git@github.com-kannav02:"
