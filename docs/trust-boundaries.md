@@ -113,6 +113,8 @@ One channel maps to one project and one server; each thread is one session on it
 | Read-only image root, all capabilities dropped except `SETUID`/`SETGID` for the privilege drop, `no-new-privileges`, 2 GB memory, 512 processes. | **Real** (S5, SEC-5) |
 | Only the project folder, its read-only inbox and its own `/data` are visible; other projects, the host and the bridge env are not. | **Real** (S5, SEC-1) |
 | `.opencode/`, `opencode.json(c)`, `.git/hooks` and `.git/config` are read-only, so the agent cannot change its own policy or plant Git hooks. | **Real** (S5, runc and gVisor) |
+| `.git/commondir` is a read-only `.` placeholder, so the agent cannot point the server's Git at a planted config with filter programs (#52). Git 2.43 works normally with it (status, diff, add, commit, stash, gc, fsck, worktrees). | **Tested** (real Git, disposable repo); container mount and separate-user check **not yet verified** |
+| Other files in `.git/` (`info/attributes`, `objects/info/alternates`, refs) remain writable from agent shells. Without config control they cannot name a program; renaming `.git` itself, which would move the read-only mounts with it, is unverified. | **Gap**: #52 follow-up |
 | Agent shells run as `agent` (uid 1001), so they cannot read the server's environment, memory or `/data`, and cannot approve their own permission requests. | **Real** (SEC-5) |
 | Everything else in the project, including `.env` files and `.git` history, is writable by the agent. | By design; damage is unrecoverable (**Gap**: SEC-6) |
 | No CPU or disk limits. | **Gap**: SEC-5 follow-up |
@@ -122,7 +124,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Control | Status |
 | --- | --- |
 | Policy version 3: reads, project edits and a named list of single shell commands run without asking; everything else, including chained or piped commands and web access, asks the owner in Slack. See `SPEC.md`. | **Tested**, **Real** (SEC-2) |
-| Always refused: `git push` in any form, `sudo`/`su`/`doas`, download-and-run, and edits to protected config. | **Tested** (SEC-2) |
+| Always refused: `git push` in any form, `sudo`/`su`/`doas`, download-and-run, and edits to protected config or anywhere in `.git` (normalized, so `..` cannot escape the check). | **Tested** (SEC-2, #52) |
 | No answer within the timeout, a plugin error, or a missing plugin never allows. | **Tested** (SEC-2) |
 | Requests from subagent sessions go to the nearest mapped ancestor's thread; requests with no mapped ancestor are rejected at once. | **Tested** (SEC-2) |
 | Subagent permission requests are not re-posted after a bridge restart. | **Gap**: SEC-2 follow-up |

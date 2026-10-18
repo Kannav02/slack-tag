@@ -4,12 +4,16 @@
 set -eu
 project=${1:?project directory}
 # An agent can leave symlinks in the project; never write through one.
-for path in .opencode .git .git/config .git/hooks opencode.json opencode.jsonc; do
+for path in .opencode .git .git/config .git/hooks .git/commondir opencode.json opencode.jsonc; do
   [ ! -L "$project/$path" ] || { echo "$path in $project is a symlink" >&2; exit 1; }
 done
 mkdir -p "$project/.opencode"
 [ -e "$project/.git/config" ] || git -C "$project" init -q
 mkdir -p "$project/.git/hooks"
+# A commondir of "." keeps Git's common directory at .git itself; mounted read-only, so the
+# agent cannot point it at a directory with its own config and filter programs (#52).
+# Rewritten every start in case the agent planted another value while it was writable.
+printf '.\n' > "$project/.git/commondir"
 for file in opencode.json opencode.jsonc; do
   [ -f "$project/$file" ] || echo '{}' > "$project/$file"
 done

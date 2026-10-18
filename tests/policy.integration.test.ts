@@ -173,6 +173,23 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("edit", "/project/../etc/passwd"), "ask");
   assert.equal(effect("write", "/project/opencode.json"), "deny");
   assert.equal(effect("edit", "/project/.git/hooks/pre-commit"), "deny");
+  // Any Git data can redirect the server's Git, for example .git/commondir (#52).
+  for (const path of [
+    "/project/.git/commondir",
+    "/project/.git/info/attributes",
+    "/project/.git/objects/info/alternates",
+    "/project/.git",
+    "/project/sub/.git",
+    ".git/config.worktree",
+    "/project/src/../.git/commondir",
+    "/project/./.git//commondir",
+  ]) {
+    assert.equal(effect("write", path), "deny", path);
+  }
+  assert.equal(effect("patch", "/project/src/a.ts", "/project/.git/commondir"), "deny");
+  assert.equal(effect("edit", "/project/src/../opencode.json"), "deny");
+  assert.equal(effect("edit", "/project/.gitignore"), "allow");
+  assert.equal(effect("edit", "/project/.github/workflows/ci.yml"), "allow");
   assert.equal(effect("webfetch", "https://example.com"), "ask");
   assert.equal(effect("external_directory", "/etc"), "ask");
   assert.equal(effect("shell"), "ask");
