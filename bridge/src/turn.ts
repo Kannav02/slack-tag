@@ -532,8 +532,10 @@ export function createRouter(
     threadTs?: string,
   ) {
     const refuse = (text: string) => slack.ephemeral(channelId, userId, threadTs, text);
-    if (userId !== config.ownerUserId)
-      return refuse("Only the owner can approve or reject actions.");
+    // Approvers count only in their channel; the thread check below binds the request to it.
+    const approvers = config.channels[channelId]?.approvers ?? [];
+    if (userId !== config.ownerUserId && !approvers.includes(userId))
+      return refuse("Only the owner or this channel's approvers can approve or reject actions.");
     const button = buttonValue(value);
     if (!button) return console.error("click ignored: malformed button value");
     const { sessionId, requestId } = button;
