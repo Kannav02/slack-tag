@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 export const PLUGIN_VERSION = "1";
 export const POLICY_VERSION = 3;
 
@@ -8,7 +10,8 @@ const ASK: Decision = { effect: "ask" };
 const DENY: Decision = { effect: "deny", message: "Blocked by the safety plugin" };
 const READ = new Set(["read", "glob", "grep", "list", "search"]);
 const EDIT = new Set(["edit", "write", "patch"]);
-const PROTECTED = /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git\/hooks(\/|$)|\.git\/config$)/;
+// Anything in .git (or a .git file) can redirect Git run by the server, for example .git/commondir.
+const PROTECTED = /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git(\/|$))/;
 const DOTENV = /(^|\/)\.env(\.|$)/;
 const SECRET = /OPENCODE_API_KEY|OPENCODE_SERVER_PASSWORD|SLACK_/;
 
@@ -216,7 +219,9 @@ export function decide(action: string, resources: readonly string[]): Decision {
     return commands.length > 0 && commands.every(safeShell) ? ALLOW : ASK;
   }
   if (EDIT.has(action)) {
-    if (resources.some((path) => PROTECTED.test(path))) return DENY;
+    // Normalized too, so `src/../.git/commondir` is caught.
+    if (resources.some((path) => PROTECTED.test(path) || PROTECTED.test(posix.normalize(path))))
+      return DENY;
     return resources.every((path) => !path.split("/").includes("..")) ? ALLOW : ASK;
   }
   if (READ.has(action)) return resources.some((path) => DOTENV.test(path)) ? ASK : ALLOW;
