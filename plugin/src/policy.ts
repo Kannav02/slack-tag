@@ -201,11 +201,29 @@ function safeGit(sub: string, rest: string[]): boolean {
     );
 }
 
+// `playwright screenshot` of a local page from the image's global install (never npx), saving a PNG
+// under /tmp or the working folder. Flags that read or write other files, or pick a browser, ask.
+const SCREENSHOT_FLAG =
+  /^--(full-page|viewport-size=\d{1,4},\d{1,4}|wait-for-timeout=\d{1,5}|timeout=\d{1,5}|wait-for-selector=.+)$/;
+const LOCAL_URL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?([/?#]\S*)?$/;
+const PNG_PATH = /^(\/tmp\/)?(\w[\w.-]*\/)*\w[\w.-]*\.png$/;
+
+function safeScreenshot(args: string[]): boolean {
+  const [url, file, ...extra] = args.filter((word) => !word.startsWith("-"));
+  return (
+    args.every((word) => !word.startsWith("-") || SCREENSHOT_FLAG.test(word)) &&
+    extra.length === 0 &&
+    LOCAL_URL.test(url ?? "") &&
+    PNG_PATH.test(file ?? "")
+  );
+}
+
 function safeShell(command: string): boolean {
   const words = shellWords(command);
   if (!words) return false;
   const [name, sub, ...rest] = words;
   if (!name || name.includes("/") || name.includes("=")) return false;
+  if (name === "playwright") return sub === "screenshot" && safeScreenshot(rest);
   if (READ_ONLY.has(name)) return true;
   if (name === "rg") return !command.includes("--pre");
   if (name === "find") return ![sub, ...rest].some((word) => FIND_UNSAFE.test(word ?? ""));

@@ -93,6 +93,7 @@ The unit runs the bridge as `slack-tag` (not uid 1000, the container user). Only
      ```
 
      Then continue with step 2. To roll back, reinstall the previous unit (and the override, if any) and `chown -R` `/var/lib/slack-tag` back to the old user.
+   - Upgrading to app screenshots ([#43](https://github.com/Kannav02/slack-tag/issues/43)): the image adds Playwright 1.56.1 and Chromium headless shell 141.0.7390.37 with its Debian libraries and fonts, about 0.65 GB (estimated). Step 2 rebuilds it; the build also downloads the browser from `cdn.playwright.dev`. Then run `systemctl start slack-tag-project@<name>.service` for each registered project so its container is recreated on the new image. Compose and env files do not change.
 2. Rebuild the containers and restart the bridge. Do not replace the env files.
 
 ```bash

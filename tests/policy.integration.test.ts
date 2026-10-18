@@ -155,6 +155,45 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     assert.equal(shell(command), "deny", command);
   }
 
+  // Screenshots: only the installed `playwright screenshot` of a local page, saved as a PNG in /tmp or the project.
+  const shot = "playwright screenshot http://localhost:3000/ /tmp/a.png";
+  for (const command of [
+    shot,
+    "playwright screenshot --full-page --viewport-size=1280,720 --wait-for-selector='#app .ready' --wait-for-timeout=500 --timeout=30000 http://127.0.0.1:5173/settings?tab=2 shots/settings.png",
+    "playwright screenshot https://[::1]:8443 /tmp/demo/home.png",
+  ]) {
+    assert.equal(shell(command), "allow", command);
+  }
+  for (const command of [
+    "playwright screenshot https://example.com /tmp/a.png",
+    "playwright screenshot http://localhost@example.com/ /tmp/a.png",
+    "playwright screenshot http://localhost.example.com/ /tmp/a.png",
+    "playwright screenshot http://169.254.169.254/ /tmp/a.png",
+    "playwright screenshot file:///etc/passwd /tmp/a.png",
+    "playwright screenshot localhost:3000 /tmp/a.png",
+    "npx playwright screenshot http://localhost:3000/ /tmp/a.png",
+    "./node_modules/.bin/playwright screenshot http://localhost:3000/ /tmp/a.png",
+    "PLAYWRIGHT_BROWSERS_PATH=/tmp/b playwright screenshot http://localhost:3000/ /tmp/a.png",
+    "playwright pdf http://localhost:3000/ /tmp/a.png",
+    "playwright screenshot --save-har=/tmp/a.har http://localhost:3000/ /tmp/a.png",
+    "playwright screenshot --user-data-dir=/tmp/p http://localhost:3000/ /tmp/a.png",
+    "playwright screenshot --channel=chrome http://localhost:3000/ /tmp/a.png",
+    "playwright screenshot -b webkit http://localhost:3000/ /tmp/a.png",
+    "playwright screenshot --viewport-size 1280,720 http://localhost:3000/ /tmp/a.png",
+    "playwright screenshot http://localhost:3000/ /etc/a.png",
+    "playwright screenshot http://localhost:3000/ ../a.png",
+    "playwright screenshot http://localhost:3000/ /tmp/../data/a.png",
+    "playwright screenshot http://localhost:3000/ .git/a.png",
+    "playwright screenshot http://localhost:3000/ /tmp/a.sh",
+    "playwright screenshot http://localhost:3000/ /tmp/a.png extra",
+    `${shot} && rm -rf src`,
+  ]) {
+    assert.equal(shell(command), "ask", command);
+  }
+  assert.equal(effect("shell", shot, "rm -rf src"), "ask");
+  assert.equal(effect("shell", shot, "sudo rm -rf /"), "deny");
+  assert.equal(shell(`${shot}; sudo rm -rf /`), "deny");
+
   // Real OpenCode 2.0.15 sends chains and pipelines as one resource per command.
   assert.equal(effect("shell", "ls", "touch chained.txt"), "ask");
   assert.equal(effect("shell", "ls", "rm -rf src"), "ask");
@@ -256,7 +295,7 @@ await test("permission hook refuses built-in reads of the server's /proc and /da
   await rm(project, { recursive: true });
 });
 
-await test("context hook tells the model the session is multiplayer", async () => {
+await test("context hook tells the model it is multiplayer, how to screenshot, and to open a PR", async () => {
   type Context = { system: { type: string; text: string }[] };
   const hooks = new Map<string, (input: Context) => void>();
   const host = {
@@ -276,11 +315,13 @@ await test("context hook tells the model the session is multiplayer", async () =
   hooks.get("context")?.(input);
   assert.equal(input.system[0]?.text, "base prompt");
   assert.match(input.system[1]?.text ?? "", /multiplayer session/);
+  assert.match(input.system[2]?.text ?? "", /playwright screenshot .*http:\/\/localhost:PORT/);
   assert.doesNotMatch(JSON.stringify(input.system), /open_pull_request/);
   // Projects with the Git proxy are also told to finish every task with a pull request.
   process.env.GIT_PROXY_URL = "http://git-proxy:8081";
   const proxied: Context = { system: [] };
   hooks.get("context")?.(proxied);
   delete process.env.GIT_PROXY_URL;
-  assert.match(proxied.system[1]?.text ?? "", /jeff\/<slug> branch.*open_pull_request/s);
+  // system is [multiplayer, screenshot, pull-requests] once the proxy is set.
+  assert.match(proxied.system[2]?.text ?? "", /jeff\/<slug> branch.*open_pull_request/s);
 });
