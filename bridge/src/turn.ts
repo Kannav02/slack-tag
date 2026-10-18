@@ -28,6 +28,9 @@ import { attachment, sendFile, type OutgoingFile, type ToolSuccess } from "./upl
 
 const LIMIT = 3500;
 const EDIT_MS = 1000;
+// The progress card re-renders on this cadence so the spinner keeps moving between agent events. It
+// sits above EDIT_MS, so each tick clears the edit throttle and lands as one rate-limited chat.update.
+const SPIN_MS = 1200;
 
 export type SlackApi = {
   post: (channel: string, threadTs: string, text: string, blocks?: object[]) => Promise<string>;
@@ -71,6 +74,10 @@ type Run = {
   card?: string | undefined;
   cardEdit: number;
   cardTimer?: NodeJS.Timeout | undefined;
+  // The spinner's current frame and its ticking timer; cardShown is the last text sent, to skip no-op edits.
+  tick: number;
+  spinTimer?: NodeJS.Timeout | undefined;
+  cardShown?: string | undefined;
   trigger?: string | undefined;
 };
 
@@ -182,6 +189,7 @@ export function createRouter(
       parts: [],
       lastEdit: 0,
       cardEdit: 0,
+      tick: 0,
     };
     runs.set(sessionId, run);
     return run;
@@ -224,12 +232,30 @@ export function createRouter(
   // The card is posted when an execution starts, so it stays above the answer messages.
   async function startCard(run: Run) {
     run.progress = startProgress();
+    run.tick = 0;
     run.trigger = triggers.get(run.sessionId);
     triggers.delete(run.sessionId);
-    const text = cardText(run.progress);
+    const text = cardText(run.progress, undefined, run.tick);
     run.card = await slack.post(run.channelId, run.threadTs, text, blocks(text));
+    run.cardShown = text;
     db.addReply(run.card, run.sessionId, run.channelId);
     run.cardEdit = Date.now();
+    startSpin(run);
+  }
+
+  // Advance the spinner on a timer so the card animates even when no agent events arrive; paint
+  // throttles the edits, so a tick never outruns the Slack rate limit.
+  function startSpin(run: Run) {
+    stopSpin(run);
+    run.spinTimer = setInterval(() => {
+      run.tick += 1;
+      later(() => paint(run));
+    }, SPIN_MS);
+  }
+
+  function stopSpin(run: Run) {
+    if (run.spinTimer) clearInterval(run.spinTimer);
+    run.spinTimer = undefined;
   }
 
   async function paint(run: Run, force = false) {
@@ -243,19 +269,25 @@ export function createRouter(
     }
     clearTimeout(run.cardTimer);
     run.cardTimer = undefined;
-    const text = cardText(run.progress);
-    await slack.update(run.channelId, run.card, text, blocks(text));
+    const text = cardText(run.progress, undefined, run.tick);
+    // A spinner tick with no new activity (e.g. while waiting for approval) renders the same text:
+    // skip the edit so a frozen card never spends a chat.update, and a broken card is not retried.
+    if (text === run.cardShown) return;
+    run.cardShown = text;
     run.cardEdit = Date.now();
+    await slack.update(run.channelId, run.card, text, blocks(text));
   }
 
   // A run that used no tools needs no card, so it is deleted; otherwise it becomes a summary.
   async function endCard(run: Run, outcome: Outcome) {
     const { progress, card, trigger } = run;
+    stopSpin(run);
     clearTimeout(run.cardTimer);
     Object.assign(run, {
       progress: undefined,
       card: undefined,
       cardTimer: undefined,
+      cardShown: undefined,
       trigger: undefined,
     });
     if (trigger) {
@@ -397,7 +429,8 @@ export function createRouter(
   async function waiting(run: Run | undefined, tool: string | undefined) {
     if (!run?.progress || !tool) return;
     setStep(run.progress, tool, "wait");
-    await paint(run);
+    // Force the edit so the card pauses its spinner and shows the approval prompt at once.
+    await paint(run, true);
   }
 
   async function end(run: Run, outcome: Outcome, note?: string) {
