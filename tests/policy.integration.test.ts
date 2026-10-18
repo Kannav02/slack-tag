@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import plugin from "../plugin/index.ts";
 
 type Setup = Parameters<typeof plugin.setup>[0];
-type PermissionInput = { sessionID: string; action: string; resources: unknown[]; effect: string };
+type PermissionInput = {
+  sessionID: string;
+  action: string;
+  resources: unknown[];
+  metadata?: Record<string, unknown>;
+  effect: string;
+  message?: string;
+};
 
-// Load the plugin as OpenCode does and call its permission hook with representative requests.
-await test("permission hook allows safe work, asks for the rest, and denies force push, sudo and download-and-run", async () => {
+// Load the plugin as OpenCode does and return its permission hook.
+async function permissionHook() {
   const hooks = new Map<string, (input: PermissionInput) => void>();
   // Only the parts of OpenCode's plugin host that the plugin uses.
   const host = {
@@ -18,10 +28,17 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     },
     shell: { hook: async () => undefined },
     session: { hook: async () => undefined },
+    tool: { transform: async () => undefined },
   };
   await plugin.setup(host as unknown as Setup);
   const evaluate = hooks.get("evaluate");
   assert.ok(evaluate);
+  return evaluate;
+}
+
+// Call the permission hook with representative requests.
+await test("permission hook allows safe work, asks for the rest, and denies force push, sudo and download-and-run", async () => {
+  const evaluate = await permissionHook();
   const effect = (action: string, ...resources: unknown[]) => {
     const input: PermissionInput = { sessionID: "ses_1", action, resources, effect: "allow" };
     evaluate(input);
@@ -196,13 +213,89 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("edit", "/project/../etc/passwd"), "ask");
   assert.equal(effect("write", "/project/opencode.json"), "deny");
   assert.equal(effect("edit", "/project/.git/hooks/pre-commit"), "deny");
+  // Any Git data can redirect the server's Git, for example .git/commondir (#52).
+  for (const path of [
+    "/project/.git/commondir",
+    "/project/.git/info/attributes",
+    "/project/.git/objects/info/alternates",
+    "/project/.git",
+    "/project/sub/.git",
+    ".git/config.worktree",
+    "/project/src/../.git/commondir",
+    "/project/./.git//commondir",
+  ]) {
+    assert.equal(effect("write", path), "deny", path);
+  }
+  assert.equal(effect("patch", "/project/src/a.ts", "/project/.git/commondir"), "deny");
+  assert.equal(effect("edit", "/project/src/../opencode.json"), "deny");
+  assert.equal(effect("edit", "/project/.gitignore"), "allow");
+  assert.equal(effect("edit", "/project/.github/workflows/ci.yml"), "allow");
   assert.equal(effect("webfetch", "https://example.com"), "ask");
   assert.equal(effect("external_directory", "/etc"), "ask");
   assert.equal(effect("shell"), "ask");
   assert.equal(effect("edit", null), "ask");
 });
 
-await test("context hook tells the model the session is multiplayer and how to screenshot its app", async () => {
+// Request shapes recorded from real OpenCode 2.0.15: external_directory sends "<dir>/*" before the
+// tool's own request, and glob and grep send their pattern as the resource and the folder as metadata.
+await test("permission hook refuses built-in reads of the server's /proc and /data without asking", async () => {
+  const evaluate = await permissionHook();
+  const decide = (action: string, resources: unknown[], path?: string) => {
+    const input: PermissionInput = {
+      sessionID: "ses_1",
+      action,
+      resources,
+      effect: "allow",
+      ...(path === undefined ? {} : { metadata: { path } }),
+    };
+    evaluate(input);
+    return input;
+  };
+  const project = await mkdtemp(join(tmpdir(), "slack-tag-policy-"));
+  await symlink("/proc/self", join(project, "self"));
+
+  for (const [action, resources, path] of [
+    ["external_directory", ["/proc/self/*"]],
+    ["external_directory", ["/proc/1/*"]],
+    ["external_directory", ["/data/*"]],
+    ["external_directory", ["/data/state/opencode/*"]],
+    ["read", ["/proc/self/environ"]],
+    ["read", ["/proc/1/environ"]],
+    ["read", ["/project/../proc/self/environ"]],
+    ["read", ["/project/./../proc/1/environ"]],
+    ["read", ["../".repeat(40) + "proc/self/environ"]],
+    ["read", ["/data/share/opencode/opencode.db"]],
+    ["read", ["/data"]],
+    ["read", [join(project, "self", "environ")]],
+    ["list", ["/proc"]],
+    ["glob", ["*"], "/proc/self"],
+    ["glob", ["*"], "/data/state"],
+    ["grep", ["PASSWORD"], "/proc/self/environ"],
+    ["grep", ["PASSWORD"], "/"],
+    ["grep", ["PASSWORD"], "/project/.."],
+  ] as [string, string[], string?][]) {
+    const input = decide(action, resources, path);
+    assert.equal(input.effect, "deny", `${action} ${resources.join(" ")} ${path ?? ""}`);
+    assert.match(input.message ?? "", /Server-only path/);
+  }
+
+  // Project reads and searches still run, including searches for text that looks like a server path.
+  assert.equal(decide("read", ["/project/src/a.ts"]).effect, "allow");
+  assert.equal(decide("read", ["src/a.ts"]).effect, "allow");
+  assert.equal(decide("read", ["/project/data/seed.json"]).effect, "allow");
+  assert.equal(decide("read", ["/database/x"]).effect, "allow");
+  assert.equal(decide("glob", ["**/*.ts"], "/project").effect, "allow");
+  assert.equal(decide("grep", ["/proc/self/environ"], ".").effect, "allow");
+  assert.equal(decide("grep", ["TODO"]).effect, "allow");
+  // Other external folders still ask the owner; the read after approval runs as before.
+  assert.equal(decide("external_directory", ["/etc/*"]).effect, "ask");
+  assert.equal(decide("external_directory", ["/project/../etc/*"]).effect, "ask");
+  assert.equal(decide("read", ["/etc/hostname"]).effect, "allow");
+  assert.equal(decide("glob", ["*"], "/").effect, "allow");
+  await rm(project, { recursive: true });
+});
+
+await test("context hook tells the model it is multiplayer, how to screenshot, and to open a PR", async () => {
   type Context = { system: { type: string; text: string }[] };
   const hooks = new Map<string, (input: Context) => void>();
   const host = {
@@ -214,11 +307,21 @@ await test("context hook tells the model the session is multiplayer and how to s
         hooks.set(name, fn);
       },
     },
+    tool: { transform: async () => undefined },
   };
   await plugin.setup(host as unknown as Setup);
   const input: Context = { system: [{ type: "text", text: "base prompt" }] };
+  delete process.env.GIT_PROXY_URL;
   hooks.get("context")?.(input);
   assert.equal(input.system[0]?.text, "base prompt");
   assert.match(input.system[1]?.text ?? "", /multiplayer session/);
   assert.match(input.system[2]?.text ?? "", /playwright screenshot .*http:\/\/localhost:PORT/);
+  assert.doesNotMatch(JSON.stringify(input.system), /open_pull_request/);
+  // Projects with the Git proxy are also told to finish every task with a pull request.
+  process.env.GIT_PROXY_URL = "http://git-proxy:8081";
+  const proxied: Context = { system: [] };
+  hooks.get("context")?.(proxied);
+  delete process.env.GIT_PROXY_URL;
+  // system is [multiplayer, screenshot, pull-requests] once the proxy is set.
+  assert.match(proxied.system[2]?.text ?? "", /jeff\/<slug> branch.*open_pull_request/s);
 });
