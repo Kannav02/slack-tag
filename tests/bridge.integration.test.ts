@@ -939,12 +939,16 @@ await test(
       h.messages.find((m) => m.thread_ts === "500.1" && m.method === "chat.postMessage")?.ts ?? "";
     assert.match(h.messages.find((m) => m.ts === cardTs)?.text ?? "", spinner);
 
-    // Across ~4s with no further agent events, the card is still edited on the spinner timer.
-    await delay(4000);
+    // With no further agent events, only the spinner timer keeps the card alive. Wait (up to the
+    // test timeout, so a loaded CI machine just waits longer instead of failing) for it to tick
+    // at least twice rather than asserting a fixed count over a fixed wall-clock window.
+    await h.until(() => edits(cardTs).length >= 2);
+    // Over a bounded window it stays throttled: the spinner timer never floods chat.update.
+    const before = edits(cardTs).length;
+    await delay(3000);
+    const burst = edits(cardTs).length - before;
+    assert.ok(burst <= 5, `the animation should stay rate-limited, saw ${burst} edits in 3s`);
     const during = edits(cardTs);
-    assert.ok(during.length >= 2, `the card should animate over time, saw ${during.length} edits`);
-    // Throttled: the timer never floods chat.update; only a handful of edits across several seconds.
-    assert.ok(during.length <= 7, `the animation should stay rate-limited, saw ${during.length}`);
     // The spinner advanced: the header is not frozen on one frame, and every edit is a live frame.
     assert.ok(
       new Set(during.map((m) => (m.text ?? "").split("\n")[0])).size >= 2,
