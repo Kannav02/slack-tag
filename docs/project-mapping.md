@@ -35,6 +35,8 @@ Do not repoint an existing channel at a different server or replace its data vol
 
 ### Current production mapping (2026-10-14)
 
+Updated 2026-10-18: research's canonical GitHub repository is `maraja/MAS` (the VPS folder and channel identity remain unchanged). Research now enables per-thread worktrees and PR creation. Dogfooding has no initial Git commit or remote, so its worktrees and PR creation remain disabled. Fixed-project Compose updates must include `/etc/slack-tag/alpha-worktrees.yaml` after the Git-proxy override.
+
 | Slack channel | Channel ID | VPS project | Server | Default model |
 | --- | --- | --- | --- | --- |
 | Private `research` | `C0C979QND8S` | `/home/devuser/projects/gem-research-suite` | `127.0.0.1:4101` (`deploy-alpha-1`) | `opencode-go/claude-haiku-5-5` |
