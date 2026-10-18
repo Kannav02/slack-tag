@@ -8,7 +8,7 @@ This document includes original requirements, not a claim that every feature shi
 Current permission policy (2026-10-02, policy version 3, replacing the 2026-09-27 allow-all policy):
 
 - Runs without asking: reads and searches (except `.env` files), edits inside the project outside protected paths, and shell commands (including newline batches and OpenCode command resources when every command is safe) from a named list: `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `grep`, `rg`, `find` (without `-delete`/`-exec`), `git status|log|diff|show|branch|add|commit`, remote listing, `ls-remote`, `fetch`, fast-forward-only `pull`, and ordinary `push` to configured remotes (without destructive flags, executable overrides or history rewriting), `npm|pnpm|yarn test|run|install|ci`, `pytest`, `make`, `tsc`, `node --test`.
-- Always refused, no prompt: force pushes (`--force*`, `-f`, `+refspec`, `--mirror`), `sudo`/`su`/`doas`, download-and-run (`curl … | sh`), and edits to protected OpenCode/Git configuration.
+- Always refused, no prompt: force pushes (`--force*`, `-f`, `+refspec`, `--mirror`), `sudo`/`su`/`doas`, download-and-run (`curl … | sh`), edits to protected OpenCode/Git configuration, and built-in reads or searches under the server's `/proc` and `/data`.
 - Force-push blocking inspects command text. Existing remote mirror or forced push-refspec configuration can make an ordinary push force updates; enforce GitHub branch rules for server-side protection.
 - Everything else asks the owner in Slack, including unparsed shell chains/pipelines, destructive Git operations, web fetch/search and unknown actions. No answer within the timeout, a plugin error, or a missing plugin never allows.
 
@@ -20,7 +20,7 @@ The owner already uses coding agents and pays for inference subscriptions, but w
 
 A self-hosted, single-owner bridge. A configured Slack channel selects a project folder and an isolated agent environment. Each thread starts a separate agent session; subsequent messages resume that session. The agent can use project files and instructions, with no memory imported from other threads.
 
-OpenCode is the first supported backend. A small common agent interface and backend-specific adapters separate Slack behavior from each agent's protocol. Messages and attachments go to the agent, streamed responses return to the same thread, and permission requests become owner-only approval prompts.
+OpenCode is the first supported backend. A small common agent interface and backend-specific adapters separate Slack behavior from each agent's protocol. Messages and attachments go to the agent, streamed responses return to the same thread, and permission requests become approval prompts for the owner and the channel's named approvers.
 
 ## User Stories
 
@@ -38,20 +38,24 @@ OpenCode is the first supported backend. A small common agent interface and back
 12. As the owner, I want restricted or destructive actions to wait for my approval, so that I control consequential operations.
 13. As the owner, I want approval to authorize only the pending action, so that one approval does not grant broad future permission.
 14. As the owner, I want rejected or unanswered requests to remain unexecuted, so that silence never grants permission.
-15. As the owner, I want my workspace teammates to talk to the agent in mapped channels while only I approve actions and register channels, so that we can share a project without giving up control of consequential operations.
+15. As the owner, I want my workspace teammates to talk to the agent in mapped channels while only I and the channel's named approvers approve actions, and only I register channels, so that we can share a project without giving up control of consequential operations.
 16. As the owner, I want project execution isolated from other projects and the host, so that an agent's mistakes have a limited blast radius.
 17. As the owner, I want to use OpenCode's supported authentication and available provider access, so that the bridge does not introduce its own inference billing layer.
 18. As a maintainer, I want backend-specific behavior behind an adapter, so that adding another compatible agent does not require rewriting the Slack integration.
 19. As the owner, I want visible failures when the agent cannot complete a request, so that a failed run is not mistaken for success.
 20. As the owner, I want idle project servers to stop automatically, so that inactive projects do not retain running agent processes and their memory usage.
 21. As the owner, I want a new message to restart a stopped project server and resume the same session, so that resource savings do not discard conversation context.
+22. As the owner, I want each Slack thread to work in its own Git worktree and branch, so that people and tasks sharing a channel neither wait for nor overwrite each other.
+23. As the owner, I want every task that changes files to end in a pull request, so that each piece of work is isolated and reviewable.
+24. As the owner, I want the agent to post evidence such as logs, command output and screenshots to the thread, so that I can check that something works without opening a terminal.
+25. As the owner, I want routine local commands that reproduce and check a problem to run without approval, so that approvals are reserved for consequential actions.
 
 ## Implementation Decisions
 
 ### Scope and responsibilities
 
 - The bridge transports messages, routes sessions, persists associations, handles attachments, and relays permission decisions. It does not implement its own agent reasoning or tool catalog.
-- Any member of the bridge's workspace can send messages in a mapped channel. One configured Slack owner identity registers channels and decides approval actions. Finer multi-user roles are excluded.
+- Any member of the bridge's workspace can send messages in a mapped channel. One configured Slack owner identity registers channels; the owner and each channel's optional `approvers` decide its approval actions. Finer multi-user roles are excluded.
 - Channel-to-folder mappings are operator configuration, not agent-controlled paths or a provisioning UI.
 - A channel selects one project environment. Threads within it use separate sessions, not separate copies of the project files.
 - The bridge runs one prompt at a time per project, in arrival order across all its threads, so sessions never edit the shared files concurrently. A message that has to wait gets a "Queued" reply. The queue is in memory; messages still waiting when the bridge restarts are dropped.
@@ -90,7 +94,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 
 ### Permissions and isolation
 
-- Routine permitted work proceeds without intervention. Restricted actions pause for an approve-once or reject decision from the configured owner in Slack.
+- Routine permitted work proceeds without intervention. Restricted actions pause for an approve-once or reject decision in Slack from the configured owner or one of the channel's approvers.
 - The execution layer must withhold the action until a valid approval arrives. A Slack prompt or model instruction by itself is not enforcement.
 - No response, failed delivery, or an unauthorized click must grant permission. Decisions must be bound to the correct pending request and session.
 - Approval does not expand container mounts, host privileges, or other hard isolation boundaries.
@@ -118,7 +122,7 @@ The manual checks must demonstrate these behaviours:
 
 | Feature | Behavioral acceptance |
 | --- | --- |
-| Access | Messages from any workspace member in a mapped channel work; another user's approval clicks and registration choices cannot trigger execution. |
+| Access | Messages from any workspace member in a mapped channel work; approval clicks from anyone but the owner or that channel's approvers, and registration choices from anyone but the owner, cannot trigger execution. |
 | Channel routing | A request uses the configured project's files and instructions; an unmapped channel cannot launch arbitrary project work. |
 | Thread sessions | Replies retain the current thread's conversation; another thread begins a separate session without the first thread's chat history. |
 | Persistence | After restarting the bridge and backend with retained storage, a thread resumes its existing conversation rather than starting over. |
@@ -135,13 +139,12 @@ Keep checks feature-oriented. Combine related acceptance scenarios in one checkl
 
 ## Out of Scope
 
-- Multi-user permissions, team administration, and hosted multi-tenant operation.
+- Roles beyond the owner and per-channel approvers, team administration, and hosted multi-tenant operation.
 - Cross-thread memory, automatic channel-history ingestion, shared wikis, and cross-project knowledge retrieval.
 - Additional agent adapters beyond OpenCode.
 - A web dashboard, scheduled jobs, or a new agent/tool execution engine.
 - User-facing stop/status controls and advanced run management beyond the automatic idle shutdown and on-demand startup described above.
-- Worktrees per thread, merging, or parallel runs within one project. Threads share project files and take turns through the project queue.
-- Generated-file delivery back to Slack.
+- Merging the agent's pull requests automatically, and parallel runs within one thread.
 - Comprehensive support for every attachment format or every provider subscription.
 
 ## Further Notes

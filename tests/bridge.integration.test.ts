@@ -515,7 +515,9 @@ await test(
     click("approve", "UOTHER", prompted("per_approve"));
     await until(() =>
       messages.some(
-        (m) => m.method === "chat.postEphemeral" && /Only the owner can approve/.test(m.text ?? ""),
+        (m) =>
+          m.method === "chat.postEphemeral" &&
+          /Only the owner or this channel's approvers can approve/.test(m.text ?? ""),
       ),
     );
     assert.equal(replies.length, 0);
@@ -944,14 +946,13 @@ await test("a failed progress update still posts and persists an approval", asyn
   assert.ok(approval);
   assert.match(h.logs(), /progress update failed:.*message_not_found/);
   assert.equal(approval.thread_ts, "400.1");
-  assert.deepEqual(
-    {
-      ...h.db
-        .prepare("SELECT state, message_ts FROM approvals WHERE request_id = ?")
-        .get("per_progress_failure"),
-    },
-    { state: "pending", message_ts: approval.ts },
-  );
+  // The bridge saves the message's timestamp once Slack's reply arrives, just after the post itself.
+  const saved = () =>
+    h.db
+      .prepare("SELECT state, message_ts FROM approvals WHERE request_id = ?")
+      .get("per_progress_failure") as { state: string; message_ts: string | null } | undefined;
+  await h.until(() => Boolean(saved()?.message_ts));
+  assert.deepEqual({ ...saved() }, { state: "pending", message_ts: approval.ts });
   h.click("approve", "UOWNER", approval);
   await h.until(() => h.replies.length === 1);
   assert.deepEqual(h.replies[0], {
@@ -1149,4 +1150,108 @@ await test("slack_attach files reach the thread redacted; a failed upload only p
   assert.match(card(), /\n✓ Attached `out\/test\.log`$/);
   assert.ok(h.reactions.includes("+white_check_mark@500.1"));
   assert.deepEqual(h.unexpected, []);
+});
+
+await test(
+  "a channel's approvers decide its approval requests; other members and other channels' approvers cannot",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t);
+    // Restart with UAPPROVER for this channel and UELSEWHERE only for another, unreachable one.
+    await h.stop();
+    const path = join(h.state, "config.json");
+    const config = JSON.parse(await readFile(path, "utf8")) as { channels: Record<string, object> };
+    config.channels.CTEST = { ...config.channels.CTEST, approvers: ["UAPPROVER"] };
+    config.channels.COTHER = {
+      name: "other",
+      projectDir: join(h.state, "..", "other"),
+      opencodeUrl: "http://127.0.0.1:9",
+      passwordFile: join(h.state, "other.env"),
+      model: "test/test",
+      approvers: ["UELSEWHERE"],
+    };
+    await writeFile(join(h.state, "other.env"), "SLACK_TAG_PASSWORD=other-secret\n");
+    await writeFile(path, JSON.stringify(config));
+    await h.start();
+
+    // A teammate's run needs approval.
+    h.send({ ts: "500.1", user: "UOTHER" });
+    await h.until(() => h.prompts.length === 1);
+    const sessionID = h.sessions[0]?.id ?? "";
+    h.permission("per_team", sessionID, "rm -rf build");
+    await h.until(() => h.prompted("per_team"));
+    const approval = h.prompted("per_team");
+    assert.ok(approval);
+
+    // A plain member and another channel's approver are refused privately, and nothing is decided.
+    h.click("reject", "UOTHER", approval);
+    h.click("approve", "UELSEWHERE", approval);
+    const refusals = () => h.messages.filter((m) => m.method === "chat.postEphemeral");
+    await h.until(() => refusals().length === 2);
+    const refusal = "Only the owner or this channel's approvers can approve or reject actions.";
+    for (const user of ["UOTHER", "UELSEWHERE"])
+      assert.equal(refusals().find((m) => m.user === user)?.text, refusal);
+    assert.equal(h.replies.length, 0);
+    assert.equal(h.messages.filter((m) => m.ts === approval.ts).length, 1);
+    assert.equal(
+      h.db.prepare("SELECT state FROM approvals WHERE request_id = ?").get("per_team")?.state,
+      "pending",
+    );
+
+    // This channel's approver decides, and the request message names them.
+    h.click("approve", "UAPPROVER", approval);
+    await h.until(() => h.replies.length === 1);
+    assert.deepEqual(h.replies[0], { sessionID, requestID: "per_team", decision: "once" });
+    await h.until(() => h.messages.some((m) => m.ts === approval.ts && m.method === "chat.update"));
+    assert.match(
+      h.messages.findLast((m) => m.ts === approval.ts)?.text ?? "",
+      /\*Approved once by <@UAPPROVER>\*$/,
+    );
+
+    // The owner still decides.
+    h.permission("per_owner", sessionID, "git reset --hard");
+    await h.until(() => h.prompted("per_owner"));
+    h.click("reject", "UOWNER", h.prompted("per_owner"));
+    await h.until(() => h.replies.length === 2);
+    assert.deepEqual(h.replies[1], { sessionID, requestID: "per_owner", decision: "reject" });
+    assert.deepEqual(h.unexpected, []);
+  },
+);
+
+await test("approvers that are not Slack user IDs stop startup", { timeout: 20_000 }, async (t) => {
+  const work = await mkdtemp(join(tmpdir(), "slack-tag-approvers-"));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const config = join(work, "state", "config.json");
+  await mkdir(join(work, "state"));
+  // Not a list, an empty ID, a handle instead of an ID, and a number.
+  for (const approvers of ["UALICE", [""], ["@alice"], [7]]) {
+    const channel = {
+      name: "a",
+      projectDir: join(work, "project"),
+      opencodeUrl: "http://127.0.0.1:9",
+      passwordEnv: "A_PASSWORD",
+      model: "test/test",
+      approvers,
+    };
+    await writeFile(config, JSON.stringify({ ownerUserId: "UOWNER", channels: { CA: channel } }));
+    // A_PASSWORD stays unset, so even an accepted config stops before reaching Slack or OpenCode.
+    const child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", "--experimental-sqlite", join(root, "bridge/src/main.ts")],
+      {
+        cwd: root,
+        env: {
+          PATH: process.env.PATH,
+          SLACK_TAG_CONFIG: config,
+          SLACK_BOT_TOKEN: "xoxb-test",
+          SLACK_APP_TOKEN: "xapp-test",
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    const errors = text(child.stderr);
+    await once(child, "exit");
+    assert.notEqual(child.exitCode, 0);
+    assert.match(await errors, /channel CA approvers must be a list of Slack user IDs/);
+  }
 });

@@ -289,6 +289,7 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
           opencodeUrl: "http://127.0.0.1:1",
           passwordEnv: "TAKEN_SERVER_PASSWORD",
           model: "test/test",
+          approvers: ["UHELPER"],
         },
       },
     }),
@@ -369,7 +370,8 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
     model: "test/test",
   });
   assert.ok(!(await readFile(join(state, "config.json"), "utf8")).includes(password));
-  assert.ok(saved.channels.CTAKEN);
+  // Rewriting config.json keeps other channels' fields, such as their approvers.
+  assert.partialDeepStrictEqual(saved.channels.CTAKEN, { approvers: ["UHELPER"] });
 
   // The new channel works without a restart, and again after one.
   mention({ ts: "100.50", text: "<@UBOT> hello" });
