@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { posix, relative, resolve } from "node:path";
+
 export const PLUGIN_VERSION = "1";
 export const POLICY_VERSION = 3;
 
@@ -8,21 +11,37 @@ const ASK: Decision = { effect: "ask" };
 const DENY: Decision = { effect: "deny", message: "Blocked by the safety plugin" };
 const READ = new Set(["read", "glob", "grep", "list", "search"]);
 const EDIT = new Set(["edit", "write", "patch"]);
-// Also the worktree `.git` file and `.git/worktrees/` (commondir): editing them would point the server's
-// git at an agent-controlled config, which could run a command as the server. Git itself writes these;
-// the agent has no reason to edit them through a tool.
-const PROTECTED =
-  /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git\/hooks(\/|$)|\.git\/config$|\.git$|\.git\/worktrees(\/|$))/;
+// Anything in .git (or a .git file — including a worktree's .git pointer and .git/worktrees/) can
+// redirect Git run by the server, for example .git/commondir.
+const PROTECTED = /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git(\/|$))/;
 const DOTENV = /(^|\/)\.env(\.|$)/;
 const SECRET = /OPENCODE_API_KEY|OPENCODE_SERVER_PASSWORD|SLACK_/;
+// Built-in tools run in the server process: /proc exposes its environment, /data (its HOME) its sessions.
+const SERVER_ONLY = ["/proc", "/data"];
+const SERVER_DENY: Decision = {
+  effect: "deny",
+  message: "Server-only path, blocked by the safety plugin",
+};
 
 // Newlines are handled as independent commands; other shell syntax requires approval.
 const COMPOUND = /[;&|<>`\r\\$(){}]/;
 const DOWNLOAD = /\b(curl|wget)\b/;
 const RUNS_DOWNLOAD =
   /\|\s*(sudo\s+)?(\S*\/)?(ba|z|da|k)?sh\b|\|\s*(\S*\/)?(python3?|node|perl|ruby|eval|source)\b|<\(\s*(curl|wget)\b|\$\(\s*(curl|wget)\b|`\s*(curl|wget)\b/;
+// curl may only fetch from the agent's own server, without flags that touch files, send data or
+// change the target (redirects, proxies, sockets, resolving).
+const CURL_LOCAL_URL = /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/[^\s@]*)?$/;
+const CURL_FLAG = /^(-[sSfiIvk]+|--(silent|show-error|fail|include|head|verbose|insecure))$/;
 const ESCALATE = new Set(["sudo", "su", "doas"]);
 const WRAPPERS = new Set(["env", "command", "exec", "nohup", "time", "nice", "xargs", "builtin"]);
+// A `.git` path as a whole component, so `.git`, `.git/config`, `/project/.git` and `a/.git/b` match,
+// while `.github` or `foo.git` do not.
+const GIT_DIR = /(^|\/)\.git(\/|$)/;
+// Shell commands that move, copy or delete a path. Renaming `.git` aside and planting a writable one
+// bypasses the read-only `.git/config`, `.git/hooks` and `.git/commondir` mounts, after which the
+// server runs Git against an agent-controlled config and its filter/hook programs (#60). Git's own
+// subcommands never move `.git` and are checked separately, so they keep working.
+const GIT_MUTATORS = new Set(["mv", "cp", "rm", "rmdir", "unlink"]);
 // git options that take a separate value before the subcommand.
 const GIT_VALUE_OPTIONS = new Set([
   "-C",
@@ -34,12 +53,22 @@ const GIT_VALUE_OPTIONS = new Set([
   "--config-env",
 ]);
 
-const READ_ONLY = new Set(["ls", "cat", "head", "tail", "wc", "pwd", "echo", "grep"]);
+const READ_ONLY = new Set(["ls", "cat", "head", "tail", "wc", "pwd", "echo", "grep", "cut", "tr"]);
+// Merging or discarding output cannot write a file, and `$?` always expands to a number.
+const HARMLESS_REDIRECT = /(^|\s)([12]?>&[12]|[12]?>>?\s*\/dev\/null|<\s*\/dev\/null)(?=\s|$)/g;
 const GIT_SAFE = new Set([
   "status",
   "log",
   "diff",
   "show",
+  "rev-parse",
+  "rev-list",
+  "ls-files",
+  "show-ref",
+  "blame",
+  "shortlog",
+  "describe",
+  "merge-base",
   "branch",
   "switch",
   "add",
@@ -77,13 +106,32 @@ function gitSubcommand(words: string[], start: number): { sub?: string; aliased:
   return { aliased };
 }
 
+// A `>` or `>>` redirect whose target is inside `.git` rewrites Git's own files (config, hooks,
+// commondir) straight from the shell, the same escalation as moving `.git` aside (#60).
+function redirectsIntoGit(command: string): boolean {
+  for (const match of command.matchAll(/\d*>>?\s*("[^"]*"|'[^']*'|[^\s;&|<>()`]+)/g)) {
+    if (GIT_DIR.test(match[1]!.replace(/['"]/g, ""))) return true;
+  }
+  return false;
+}
+
+// A move/copy/delete command (the word at `first`, past any env prefix or wrapper) with a `.git`
+// argument swaps the server's Git directory for an agent-controlled one (#60). `git` is never in the
+// set, so git's own subcommands are untouched.
+function mutatesGitDir(words: string[], first: number): boolean {
+  if (first < 0 || !GIT_MUTATORS.has(base(words[first]!))) return false;
+  return words.slice(first + 1).some((word) => GIT_DIR.test(word));
+}
+
 function denied(command: string): boolean {
   if (DOWNLOAD.test(command) && RUNS_DOWNLOAD.test(command)) return true;
+  if (redirectsIntoGit(command)) return true;
   for (const segment of command.split(/[;&|\n()`]|\$\(/)) {
     const words = tokens(segment);
     let first = words.findIndex((word) => !/^\w+=/.test(word));
     while (first >= 0 && WRAPPERS.has(base(words[first]!))) first++;
     if (first >= 0 && ESCALATE.has(base(words[first] ?? ""))) return true;
+    if (mutatesGitDir(words, first)) return true;
     // git can appear anywhere, for example inside `bash -c 'git push'`.
     for (let i = 0; i < words.length; i++) {
       if (base(words[i]!) !== "git") continue;
@@ -134,9 +182,13 @@ function shellWords(command: string): string[] | undefined {
   return words;
 }
 
+// A bare `--` only ends the options, as in `git log -- path`.
 function hasOption(flags: string[], names: string[]): boolean {
   return flags.some(
-    (flag) => flag.startsWith("--") && names.some((name) => name.startsWith(flag.split("=")[0]!)),
+    (flag) =>
+      flag.startsWith("--") &&
+      flag !== "--" &&
+      names.some((name) => name.startsWith(flag.split("=")[0]!)),
   );
 }
 
@@ -181,7 +233,6 @@ function safeGit(sub: string, rest: string[]): boolean {
     "ls-remote": /^(--(heads|branches|tags|refs|quiet|exit-code)|-q)$/,
   };
   if (flags.some((flag) => !options[sub]!.test(flag))) return false;
-  if (sub === "pull" && !flags.includes("--ff-only")) return false;
   // Only configured remote names and ordinary refs, never URLs, paths or +refspecs.
   const args = rest.filter((word) => !word.startsWith("-"));
   if (args.length && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(args[0]!)) return false;
@@ -195,45 +246,117 @@ function safeGit(sub: string, rest: string[]): boolean {
     );
 }
 
+// `playwright screenshot` of a local page from the image's global install (never npx), saving a PNG
+// under /tmp or the working folder. Flags that read or write other files, or pick a browser, ask.
+const SCREENSHOT_FLAG =
+  /^--(full-page|viewport-size=\d{1,4},\d{1,4}|wait-for-timeout=\d{1,5}|timeout=\d{1,5}|wait-for-selector=.+)$/;
+const LOCAL_URL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?([/?#]\S*)?$/;
+const PNG_PATH = /^(\/tmp\/)?(\w[\w.-]*\/)*\w[\w.-]*\.png$/;
+
+function safeScreenshot(args: string[]): boolean {
+  const [url, file, ...extra] = args.filter((word) => !word.startsWith("-"));
+  return (
+    args.every((word) => !word.startsWith("-") || SCREENSHOT_FLAG.test(word)) &&
+    extra.length === 0 &&
+    LOCAL_URL.test(url ?? "") &&
+    PNG_PATH.test(file ?? "")
+  );
+}
+
 function safeShell(command: string): boolean {
-  const words = shellWords(command);
+  const words = shellWords(command.replace(HARMLESS_REDIRECT, "$1").replace(/\$\?/g, "0"));
   if (!words) return false;
   const [name, sub, ...rest] = words;
   if (!name || name.includes("/") || name.includes("=")) return false;
+  if (name === "playwright") return sub === "screenshot" && safeScreenshot(rest);
   if (READ_ONLY.has(name)) return true;
+  // Waiting, for example for a background dev server to start, changes nothing.
+  if (name === "sleep") return true;
+  // sort can write a file or run a compressor; uniq writes its second file argument.
+  if (name === "sort")
+    return (
+      !words.some((word) => /^-[^-]*o/.test(word)) &&
+      !hasOption(words, ["--output", "--compress-program"])
+    );
+  if (name === "uniq") return words.slice(1).filter((word) => !word.startsWith("-")).length < 2;
   if (name === "rg") return !command.includes("--pre");
   if (name === "find") return ![sub, ...rest].some((word) => FIND_UNSAFE.test(word ?? ""));
   if (name === "pytest" || name === "make" || name === "tsc") return true;
   if (name === "node") return sub === "--test";
   if (PACKAGE_MANAGERS.has(name)) return PACKAGE_SAFE.has(sub ?? "");
+  // `$?` is checked as 0 above, so it must not reach a curl address.
+  if (name === "curl") return !command.includes("$") && safeCurl(words.slice(1));
   return name === "git" && safeGit(sub ?? "", rest);
 }
 
-export function decide(action: string, resources: readonly string[]): Decision {
+function safeCurl(args: string[]): boolean {
+  return (
+    args.some((arg) => CURL_LOCAL_URL.test(arg)) &&
+    args.every((arg) => CURL_LOCAL_URL.test(arg) || CURL_FLAG.test(arg))
+  );
+}
+
+// Relative paths resolve against the server's directory (/project); symlinks resolve when the path exists.
+function serverOnly(path: string, parent: boolean): boolean {
+  let full = resolve(path);
+  try {
+    full = realpathSync(full);
+  } catch {}
+  return SERVER_ONLY.some((root) => within(root, full) || (parent && within(full, root)));
+}
+
+function within(folder: string, path: string): boolean {
+  const rest = relative(folder, path);
+  return rest !== ".." && !rest.startsWith("../");
+}
+
+function readsServer(action: string, resources: readonly string[], path: unknown): boolean {
+  if (!READ.has(action) && action !== "external_directory") return false;
+  const search = action === "glob" || action === "grep";
+  const paths = search ? (typeof path === "string" ? [path] : []) : resources;
+  // A grep over a parent such as / would read file contents under /proc.
+  return paths.some((item) => serverOnly(item, action === "grep"));
+}
+
+/** `path` is the folder OpenCode sends as metadata for glob and grep, whose resources are patterns. */
+export function decide(action: string, resources: readonly string[], path?: unknown): Decision {
   if (action === "shell") {
     // OpenCode splits chains and pipelines into one resource per command, so every part is checked.
     const command = resources.join(" | ");
-    if (denied(command)) return DENY;
+    // Dropping harmless redirections first keeps `2>&1` from splitting a force push from its flags.
+    if (denied(command.replace(HARMLESS_REDIRECT, "$1"))) return DENY;
     const commands = resources
       .flatMap((resource) => resource.split("\n"))
       .filter((part) => part.trim());
     return commands.length > 0 && commands.every(safeShell) ? ALLOW : ASK;
   }
   if (EDIT.has(action)) {
-    if (resources.some((path) => PROTECTED.test(path))) return DENY;
+    // Normalized too, so `src/../.git/commondir` is caught.
+    if (resources.some((path) => PROTECTED.test(path) || PROTECTED.test(posix.normalize(path))))
+      return DENY;
     return resources.every((path) => !path.split("/").includes("..")) ? ALLOW : ASK;
   }
+  if (readsServer(action, resources, path)) return SERVER_DENY;
   if (READ.has(action)) return resources.some((path) => DOTENV.test(path)) ? ASK : ALLOW;
   return ASK;
 }
 
 // Errors never allow: the action waits for the owner instead.
-export function safeDecide(action: string, resources: readonly string[]): Decision {
+export function safeDecide(action: string, resources: readonly string[], path?: unknown): Decision {
   try {
-    return decide(action, resources);
+    return decide(action, resources, path);
   } catch {
     return ASK;
   }
+}
+
+// Plain `git pull` runs without approval, so agent shells only fast-forward unless a flag says otherwise.
+export function fastForwardPulls(env: Record<string, string | undefined>): void {
+  const count = Number(env.GIT_CONFIG_COUNT ?? 0);
+  if (!Number.isInteger(count) || count < 0) return;
+  env[`GIT_CONFIG_KEY_${count}`] = "pull.ff";
+  env[`GIT_CONFIG_VALUE_${count}`] = "only";
+  env.GIT_CONFIG_COUNT = String(count + 1);
 }
 
 export function stripSecrets(env: Record<string, string | undefined>): void {

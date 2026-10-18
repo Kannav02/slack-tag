@@ -51,8 +51,13 @@ services:
       - ${SLACK_TAG_PROJECT}/.opencode:/project/.opencode:ro
       - ${SLACK_TAG_PROJECT}/opencode.json:/project/opencode.json:ro
       - ${SLACK_TAG_PROJECT}/opencode.jsonc:/project/opencode.jsonc:ro
+      # .git is its own mount point (read-write) so the agent cannot rename or delete it; the kernel
+      # refuses that with EBUSY, which would otherwise move the read-only mounts below aside and let
+      # a fresh writable .git with agent-chosen config/hooks/commondir run under the server (#60).
+      - ${SLACK_TAG_PROJECT}/.git:/project/.git
       - ${SLACK_TAG_PROJECT}/.git/hooks:/project/.git/hooks:ro
       - ${SLACK_TAG_PROJECT}/.git/config:/project/.git/config:ro
+      - ${SLACK_TAG_PROJECT}/.git/commondir:/project/.git/commondir:ro
       # Slack uploads, written by the bridge; it passes SLACK_TAG_INBOX when it starts the project.
       - ${SLACK_TAG_INBOX:?set SLACK_TAG_INBOX}:/inbox:ro
 

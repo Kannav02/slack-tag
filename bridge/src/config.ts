@@ -16,6 +16,8 @@ export type StoredChannel = {
   // The server must disable project config (OPENCODE_CONFIG_PROJECT_DISABLE); otherwise worktree creation fails
   // and the thread falls back to the shared /project checkout.
   worktrees?: boolean;
+  // Slack users who may approve or reject actions in this channel's threads, besides the owner.
+  approvers?: string[];
 };
 export type Channel = StoredChannel & {
   serverDir: string;
@@ -39,6 +41,8 @@ export type Config = {
 };
 
 const within = (parent: string, child: string) => !relative(parent, child).startsWith("..");
+// Slack user IDs start with U, or W for Enterprise Grid users.
+const isUserId = (user: unknown) => typeof user === "string" && /^[UW][A-Z0-9]+$/.test(user);
 
 export function loadConfig(path: string): Config {
   const config = JSON.parse(readFileSync(path, "utf8")) as Omit<Config, "channels"> & {
@@ -65,6 +69,9 @@ export function prepareChannel(configPath: string, id: string, channel: StoredCh
     throw new Error(`channel ${id} needs exactly one of passwordEnv or passwordFile`);
   if (!/^[A-Za-z0-9_-]+$/.test(channel.name))
     throw new Error(`channel ${id} name may only use letters, digits, - and _`);
+  const { approvers } = channel;
+  if (approvers !== undefined && !(Array.isArray(approvers) && approvers.every(isUserId)))
+    throw new Error(`channel ${id} approvers must be a list of Slack user IDs such as U0123456789`);
   const stateDir = dirname(resolve(configPath));
   const projectDir = resolve(channel.projectDir);
   if (within(projectDir, stateDir) || within(stateDir, projectDir)) {

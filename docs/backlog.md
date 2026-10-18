@@ -14,10 +14,19 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-6 | Per-turn project snapshots | Medium | Research/design |
 | SEC-7 | Document architecture and trust boundaries | Medium | Done; keep updated |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
-| CMD-2 | Reduce unnecessary approvals for routine Git command batches | High | Deferred; [#37](https://github.com/Kannav02/slack-tag/issues/37) |
+| CMD-2 | Reduce unnecessary approvals for routine Git command batches and safe local work | High | In progress; PR [#38](https://github.com/Kannav02/slack-tag/pull/38) for [#37](https://github.com/Kannav02/slack-tag/issues/37), then [#40](https://github.com/Kannav02/slack-tag/issues/40) for localhost `curl` and background commands |
 | ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
-| DEMO-1 | Demo features with headless browser screenshots | Medium | Research/design |
+| DEMO-1 | Demo features with headless browser screenshots | Medium | In progress; [#43](https://github.com/Kannav02/slack-tag/issues/43) |
 | UX-1 | Show run progress in Slack threads | Medium | Card and reactions implemented; dev Slack check pending |
+| PAR-1 | Each Slack thread works in its own Git worktree and branch | High | In progress; [#39](https://github.com/Kannav02/slack-tag/issues/39) |
+| TEAM-1 | Per-channel approvers | High | In progress; [#41](https://github.com/Kannav02/slack-tag/issues/41) |
+| OUT-1 | The agent sends files to its Slack thread | High | In progress; [#42](https://github.com/Kannav02/slack-tag/issues/42) |
+| GIT-1 | Open a pull request at the end of every task | High | In progress; [#44](https://github.com/Kannav02/slack-tag/issues/44) |
+| CMD-3 | `/fix`: reproduce, fix and prove with evidence | Medium | Planned after OUT-1 and GIT-1; [#45](https://github.com/Kannav02/slack-tag/issues/45) |
+
+## Daily-driver direction (2026-10-17)
+
+The owner wants Slack Tag to replace terminal agents for daily work shared with teammates. Decisions: every task that changes files ends in a pull request; each Slack thread works in its own Git worktree and branch; named teammates may approve actions per channel; routine local commands for reproducing and checking problems run without approval; and the agent proves its work with files, command logs and screenshots posted to the thread. Each item above has a GitHub issue with scope and acceptance criteria and lands as its own PR. The rows for PAR-1, TEAM-1, OUT-1, GIT-1, CMD-2 and DEMO-1 change state as their PRs merge.
 
 ## Current behavior
 
@@ -109,7 +118,7 @@ Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that
 
 ## Feature items
 
-- **CMD-2 Git approvals:** [Issue #37](https://github.com/Kannav02/slack-tag/issues/37) tracks approval noise from plain pull, harmless stderr/exit-status handling, and `git rev-parse`. A second visible log/diff batch allows locally, so capture its complete OpenCode permission resources and compare deployed behavior before diagnosing it. Work deferred by the owner; preserve force-push denial and destructive-operation approvals. Separate from proxy transport coverage in #36.
+- **CMD-2 Git approvals:** [Issue #37](https://github.com/Kannav02/slack-tag/issues/37). Plain `git pull` (made fast-forward-only in agent shells), output-merging and `/dev/null` redirections, `$?`, read-only Git inspection commands (`rev-parse`, `ls-files`, `blame` and similar), `git log -- path`, and `cut`/`tr`/`sort`/`uniq` pipeline filters now run without approval; force-push denial and destructive-operation approvals are unchanged. Verified with integration tests and real OpenCode 2.0.15 with a scripted model (see findings); not yet deployed or checked in Slack. The second reported log/diff batch's hidden "Show more" resources were never captured, so whether this covers it is unconfirmed.
 - **CMD-1 Commands:** a mention whose text starts with `/init`, `/review`, `/model`, `/stop` or `/compact` is a command; any other leading `/` stays a prompt. `/init` and `/review` run OpenCode server commands in the thread's session. `/model` lists enabled models from the channel model's provider and switches only the thread's session; attachments are checked against the session's current model. `/stop` interrupts and `/compact` requests compaction. Verified with integration tests and against real OpenCode 2.0.15 with a scripted model; not yet checked in a development Slack workspace (Slack may reject thread replies starting with `/`, so commands are written after the mention).
 - **ONB-1 Onboarding:** `@OpenCode register` in an unmapped channel connects a folder from `onboarding.projectsRoot`, with its own container, key proxy, network, volume and server password. See `docs/project-mapping.md`. Not yet verified on the VPS. Cloning repositories and unregistering are not covered.
 - **UX-1 Run progress:** when an execution starts, the bridge posts a progress card in the thread above the answer, edits it at most once a second as tools run (`◌` running, `✓` done, `✗` failed, `⏸` waiting for approval), and turns it into a summary at the end, or deletes it when no tool ran. The prompt gets 👀 while its run is active, then ✅ or ❌. Cards name only the tool and, for read/edit/write, a path relative to the project; tool input never reaches Slack. Separate text blocks in a reply get a blank line between them. This is a read-only display, not the stop/status controls SPEC.md leaves out. Verified with integration tests that replay an event stream recorded from real OpenCode 2.0.15 (`spike/v2/record.sh`). Needs the `reactions:write` bot scope; not yet checked in a development Slack workspace. Slack's native status line (`assistant.threads.setStatus`) is a follow-up once it is verified in channel threads.
@@ -121,7 +130,7 @@ Written as [`docs/trust-boundaries.md`](trust-boundaries.md). Each SEC item that
 
 - **Browser:** a headless Chromium sidecar container per project on the project's own network, following the per-project key-proxy pattern, so the OpenCode image stays small and the browser is separate from the project files. The alternative is Playwright plus Chromium inside the OpenCode image: simpler, but it adds about 400 MB, and Chromium needs `--no-sandbox` and more shared memory in a read-only container.
 - **Agent tools:** Playwright MCP (`@playwright/mcp`) configured in OpenCode and connected to the sidecar over CDP, giving the agent navigate, click, type and screenshot tools.
-- **Output:** the agent writes images to `.slack-tag/outbox/<thread>/`. The bridge, which already holds the Slack token, uploads new files to the thread. The agent receives no Slack or GitHub token; `git push` stays blocked.
+- **Output:** the agent saves screenshots under `/tmp` and posts them with the `slack_attach` tool ([#42](https://github.com/Kannav02/slack-tag/issues/42)): the plugin reads each file as the agent user and the bridge, which holds the Slack token, uploads it to the thread. The agent receives no Slack or GitHub token.
 - **PRs (later):** a token-holding component outside the agent (the bridge or a proxy) attaches images to the PR, for example by committing them to a `pr-assets` branch and linking them in the description, using a token scoped to the repo.
 
 Open questions:

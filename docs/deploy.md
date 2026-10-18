@@ -4,7 +4,7 @@ Install, update, or roll back Slack Tag on the VPS. The checks to run afterwards
 
 See [project and session mapping](project-mapping.md) for the current deployment, manual steps to connect another project, and the planned simpler onboarding flow.
 
-Use the production Slack app here, never the dev app used by cloud agents. Socket Mode splits events between every connection that shares an app token.
+Use the production Slack app here, never the dev app used by cloud agents. Socket Mode splits events between every connection that shares an app token. The bot needs the `files:write` scope for files the agent posts with `slack_attach`.
 
 ## Install
 
@@ -79,6 +79,9 @@ The unit runs the bridge as `slack-tag` (not uid 1000, the container user). Only
    - Upgrading to per-project passwords: for each project, create its env file (`alpha.env`) with a new random `OPENCODE_SERVER_PASSWORD`, add the same value to `bridge.env` under the channel's `passwordEnv` name, and add `passwordEnv` to each channel in `config.json`. Then remove `OPENCODE_SERVER_PASSWORD` from `bridge.env` and delete `opencode.env`. Rolling back to an earlier commit needs both restored.
    - Upgrading to the separate upload inbox: create `/var/lib/slack-tag/inbox/<channel name>` for each channel as in install step 4, and set `ALPHA_INBOX` in the Compose environment if it differs from `/var/lib/slack-tag/inbox/alpha`. Channel names may only use letters, digits, `-` and `_`. The bridge now refuses a `projectDir` that is `/`, holds, or sits inside `/var/lib/slack-tag`. Old uploads in `<project>/.slack-tag/` are no longer used; delete them once no thread needs them.
    - Upgrading to the separate agent user, gVisor and firewall: rerun `deploy/prepare-project.sh` on each project (agent shells run as uid 1001 in group 1000, so the project needs group write), install gVisor as in the install section, and install and enable `slack-tag-firewall` as in install step 6. Compose now gives each project network a fixed subnet (`172.30.N.0/24`); `docker compose down` before `up` so the networks are recreated.
+   - Upgrading to `slack_attach` (agent file uploads): add the `files:write` bot scope to the Slack app and reinstall it, which changes the live app and needs the owner's go-ahead. The tool lives in the plugin baked into the image, so rebuild the containers in the same update as the bridge. Without the scope, each upload fails with a note in the thread.
+   - Upgrading to `/fix`: the command lives in the same plugin, so rebuild the containers with the bridge; an older image answers `/fix` with "Command not found: fix". Its `fix-commands.log` upload also needs `files:write`.
+   - Upgrading to the `.git` mount lock (#60): Compose now bind-mounts the whole `.git` as its own read-write mount point (`/project/.git`), with `.git/config`, `.git/hooks` and `.git/commondir` nested under it read-only, so the agent can no longer rename or delete `.git` to move those read-only mounts aside. No new files or env are needed — `deploy/prepare-project.sh` already creates `.git` — but the container must be **recreated**, not just restarted, to pick up the mount: `docker compose down` then `up -d` (step 2) replaces it. Confirm afterwards with `mountpoint /project/.git` inside the container (or `docker inspect` showing the `/project/.git` bind). Rolling back to an earlier commit and recreating removes the mount.
    - Upgrading to the dedicated bridge user: deploy together with the separate attachment inbox (SEC-1), because this unit cannot reach project folders. Stop the bridge, then create the user and fix ownership. If an override sets `User=` (the live VPS uses `devuser`), remove it.
 
      ```bash
@@ -92,6 +95,7 @@ The unit runs the bridge as `slack-tag` (not uid 1000, the container user). Only
      ```
 
      Then continue with step 2. To roll back, reinstall the previous unit (and the override, if any) and `chown -R` `/var/lib/slack-tag` back to the old user.
+   - Upgrading to app screenshots ([#43](https://github.com/Kannav02/slack-tag/issues/43)): the image adds Playwright 1.56.1 and Chromium headless shell 141.0.7390.37 with its Debian libraries and fonts, about 0.65 GB (estimated). Step 2 rebuilds it; the build also downloads the browser from `cdn.playwright.dev`. Then run `systemctl start slack-tag-project@<name>.service` for each registered project so its container is recreated on the new image. Compose and env files do not change.
 2. Rebuild the containers and restart the bridge. Do not replace the env files.
 
 ```bash
@@ -135,6 +139,7 @@ Git in the agent has no personal SSH keys or SSH client. Add a repository-scoped
    ```
    Restart that instance after rebuilding the image. **Do not put this setting in shared `registration.env`**: that would grant every registered project the same repository access. The launcher accepts this setting only from the trusted service environment; bridge-written project env files cannot enable it. The registered override uses only its own `172.31.<net>.254` address.
 5. Verify `git ls-remote origin`, `git fetch origin`, `git pull --ff-only origin main`, then a normal push to a disposable branch. Verify rewriting/deleting that branch is rejected by GitHub rules; delete the test branch administratively afterward. Do not force-push a production branch to test protections.
+6. Optional pull requests: with pushes enabled, set `GIT_ALLOW_PULL_REQUESTS=1` so the agent's `open_pull_request` tool can open or find pull requests from `jeff/*` branches into the default branch; the host account (Kannav02) authors them. Rebuild the image, then recreate the project as in step 3 or 4, so the proxy gets the setting and the agent container gets `GIT_PROXY_URL`. Verify with a disposable `jeff/` branch, then close its pull request and delete the branch.
 
 The overrides rewrite GitHub HTTPS URLs and personal `github.com-kannav02` SSH aliases to the proxy without changing the mounted `.git/config`. The host login may access multiple repositories, but only the proxy receives its token. Its exact repository and smart-HTTP endpoint allowlist prevents using the credential for another repository; redirects and upstream error details are not returned. Submodules, LFS, other SSH aliases and repositories need separate configuration and are not supported by this proxy. `git push origin <branch>` works; `git push -u` may fail to save tracking metadata because `.git/config` remains read-only. Removing the override/per-instance setting and recreating the agent disables proxy routing; remove the unused sidecar as well. No production credentials or deployment are included in this change.
 

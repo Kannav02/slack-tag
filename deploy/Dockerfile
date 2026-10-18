@@ -1,9 +1,16 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates \
+  && apt-get install -y --no-install-recommends git ca-certificates curl \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g @opencode/cli@2.0.15
+
+# Headless Chromium 141.0.7390.37 (build 1194) for `playwright screenshot` of local pages (plugin/src/policy.ts).
+# Root-owned on the read-only root: agent shells (uid 1001) can run it but not change it.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN npm install -g playwright@1.56.1 \
+  && playwright install --with-deps --only-shell chromium \
+  && rm -rf /var/lib/apt/lists/*
 
 # OpenCode resolves "../plugin" from the config file's directory, so this mirrors the repo's deploy/ and plugin/.
 WORKDIR /opt/slack-tag
