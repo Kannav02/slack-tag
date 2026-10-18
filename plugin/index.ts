@@ -17,7 +17,7 @@ export default Plugin.define({
       status: async () => status(),
     });
     await ctx.permission.hook("evaluate", (input) => {
-      const decision = safeDecide(input.action, input.resources);
+      const decision = safeDecide(input.action, input.resources, input.metadata?.path);
       input.effect = decision.effect;
       if (decision.message) input.message = decision.message;
     });

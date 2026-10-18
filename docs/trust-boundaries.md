@@ -136,6 +136,7 @@ One channel maps to one project and one server; each thread is one session on it
 | No Slack tokens in containers. | **Real** (S5) |
 | The real model key lives only in `key-proxy`; project containers get the placeholder `unused`. | **Real** (SEC-5 PR #6) |
 | Agent shells get no server password or `SLACK_` variable, and as uid 1001 cannot read the server's `/proc/<pid>/environ`. | **Real** (S1, S2, SEC-5) |
+| Built-in read, list, glob and grep tools run in the server process (uid 1000), so the plugin refuses them without asking when the path resolves (after `..`, relative paths and existing symlinks) under `/proc` (the server's environment) or `/data` (the server's `HOME` and session store). This covers `external_directory` requests there and grep over a parent such as `/`. Other external folders still ask. | **Tested**, **Real** (#51, OpenCode 2.0.15 outside a container) |
 | The agent can still use its project's key proxy to spend inference. | By design |
 
 ### Agent → network
