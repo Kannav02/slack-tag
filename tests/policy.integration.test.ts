@@ -30,6 +30,7 @@ async function permissionHook() {
     shell: { hook: async () => undefined },
     session: { hook: async () => undefined },
     tool: { transform: async () => undefined },
+    command: { transform: async () => undefined },
   };
   await plugin.setup(host as unknown as Setup);
   const evaluate = hooks.get("evaluate");
@@ -341,6 +342,7 @@ await test("context hook tells the model it is multiplayer, how to screenshot, a
       },
     },
     tool: { transform: async () => undefined },
+    command: { transform: async () => undefined },
   };
   await plugin.setup(host as unknown as Setup);
   const input: Context = { system: [{ type: "text", text: "base prompt" }] };
@@ -373,6 +375,7 @@ await test("shell hook keeps existing Git config and makes plain pull fast-forwa
     },
     session: { hook: async () => undefined },
     tool: { transform: async () => undefined },
+    command: { transform: async () => undefined },
   };
   await plugin.setup(host as unknown as Setup);
   const work = await mkdtemp(join(tmpdir(), "slack-tag-pull-"));
