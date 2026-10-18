@@ -24,6 +24,9 @@ const VERBS: Record<string, [string, string]> = {
 };
 const FILE_TOOLS = new Set(["read", "edit", "write"]);
 const ICONS = { run: "◌", done: "✓", fail: "✗", wait: "⏸" };
+// Slack cannot animate, so the card cycles this Braille spinner on a timer to look alive while a turn runs.
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+export const spinnerAt = (tick: number) => SPINNER[tick % SPINNER.length]!;
 
 // A path inside the project is shown relative to it; anything else is not shown at all.
 function targetOf(tool: string, input: Record<string, unknown>, root: string) {
@@ -68,15 +71,20 @@ function elapsed(progress: Progress) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-// The card's text: a header, then the latest steps. outcome is set once the run has ended.
-export function cardText(progress: Progress, outcome?: "done" | "failed" | "interrupted") {
+// The card's text: a header, then the latest steps. outcome is set once the run has ended; while it
+// runs, tick advances the spinner and the elapsed clock keeps counting so the card reads as alive.
+export function cardText(
+  progress: Progress,
+  outcome?: "done" | "failed" | "interrupted",
+  tick = 0,
+) {
   const { steps } = progress;
   const count = `${steps.length} step${steps.length === 1 ? "" : "s"}`;
   const header = outcome
     ? `*${{ done: "✓ Done", failed: "✗ Failed", interrupted: "Stopped" }[outcome]}* · ${count} · ${elapsed(progress)}`
     : steps.some((step) => step.state === "wait")
       ? "*Waiting for approval…*"
-      : "*Working…*";
+      : `${spinnerAt(tick)} *Working…* · ${elapsed(progress)}`;
   const hidden = steps.length - SHOWN;
   const lines = steps.slice(-SHOWN).map(line);
   if (hidden > 0) lines.unshift(`+${hidden} earlier step${hidden === 1 ? "" : "s"}`);

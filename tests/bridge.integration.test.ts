@@ -823,7 +823,8 @@ await test(
     await h.until(() => /Done/.test(card("400.1").last?.text ?? ""));
 
     const { post, last } = card("400.1");
-    assert.equal(post?.text, "*Working…*");
+    // The card opens with an animated "working" header: a spinner frame and a live elapsed clock.
+    assert.match(post?.text ?? "", /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \*Working…\* · \d+:\d\d$/);
     assert.match(last?.text ?? "", /^\*✓ Done\* · 4 steps · 0:0\d$/m);
     assert.deepEqual(last?.text?.split("\n").slice(1), [
       "✓ Read `README.md`",
@@ -838,9 +839,10 @@ await test(
       h.messages.findLast((m) => m.ts === answer[0]?.ts)?.text,
       "Let me check the readme first.\n\nTwo more checks.\n\nDone. The project has one readme and nothing else to report.",
     );
-    // Thirteen tool and approval events reached the bridge, but the card is only edited a few times.
+    // Thirteen tool and approval events reached the bridge, but the card is only edited a few times;
+    // the run finishes within one spinner tick, so the animation adds no edits of its own here.
     assert.ok(
-      h.messages.filter((m) => m.ts === post?.ts && m.method === "chat.update").length <= 3,
+      h.messages.filter((m) => m.ts === post?.ts && m.method === "chat.update").length <= 4,
     );
     assert.deepEqual(h.reactions, ["+eyes@400.1", "-eyes@400.1", "+white_check_mark@400.1"]);
     assert.equal(
@@ -898,14 +900,80 @@ await test(
   },
 );
 
+await test(
+  "the progress card animates on a timer while a turn runs, then stops once it ends",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t);
+    const spinner = /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \*Working…\* · \d+:\d\d$/m;
+    const edits = (ts: string) =>
+      h.messages.filter((m) => m.ts === ts && m.method === "chat.update");
+
+    h.send({ ts: "500.1" });
+    await h.until(() => h.prompts.length === 1);
+    const sessionID = h.sessions[0]?.id ?? "";
+
+    // The agent is working but sends no tool events: only the animation keeps the card alive.
+    h.emit("session.execution.started", sessionID);
+    await h.until(() =>
+      h.messages.some((m) => m.thread_ts === "500.1" && m.method === "chat.postMessage"),
+    );
+    const cardTs =
+      h.messages.find((m) => m.thread_ts === "500.1" && m.method === "chat.postMessage")?.ts ?? "";
+    assert.match(h.messages.find((m) => m.ts === cardTs)?.text ?? "", spinner);
+
+    // Across ~4s with no further agent events, the card is still edited on the spinner timer.
+    await delay(4000);
+    const during = edits(cardTs);
+    assert.ok(during.length >= 2, `the card should animate over time, saw ${during.length} edits`);
+    // Throttled: the timer never floods chat.update; only a handful of edits across several seconds.
+    assert.ok(during.length <= 7, `the animation should stay rate-limited, saw ${during.length}`);
+    // The spinner advanced: the header is not frozen on one frame, and every edit is a live frame.
+    assert.ok(
+      new Set(during.map((m) => (m.text ?? "").split("\n")[0])).size >= 2,
+      "the spinner/elapsed header should change between edits",
+    );
+    for (const m of during) assert.match(m.text ?? "", spinner);
+
+    // One tool runs and the turn ends: the spinner is replaced by the finished result in place.
+    h.emit("session.tool.input.started", sessionID, undefined, {
+      sessionID,
+      id: "s1",
+      name: "read",
+    });
+    h.emit("session.tool.called", sessionID, undefined, {
+      sessionID,
+      id: "s1",
+      input: { path: "/project/README.md" },
+    });
+    h.emit("session.tool.success", sessionID, undefined, { sessionID, id: "s1" });
+    h.emit("session.execution.succeeded", sessionID);
+    await h.until(() => /✓ Done/.test(edits(cardTs).at(-1)?.text ?? ""));
+    const done = edits(cardTs).at(-1)?.text ?? "";
+    assert.match(done, /^\*✓ Done\* · 1 step · \d+:\d\d$/m);
+    assert.match(done, /✓ Read `README.md`/);
+    assert.doesNotMatch(done, /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+
+    // The timer was cleared on completion: the finished card is never edited again.
+    const settled = edits(cardTs).length;
+    await delay(3500);
+    assert.equal(edits(cardTs).length, settled, "a finished card must not keep animating");
+    assert.equal(
+      h.db.prepare("SELECT state FROM replies WHERE message_ts = ?").get(cardTs)?.state,
+      "done",
+    );
+    assert.deepEqual(h.unexpected, []);
+  },
+);
+
 await test("a failed progress update still posts and persists an approval", async (t) => {
   const h = await harness(t);
   h.send({ ts: "400.1" });
   await h.until(() => h.prompts.length === 1);
   const sessionID = h.sessions[0]?.id ?? "";
   h.emit("session.execution.started", sessionID);
-  await h.until(() => h.messages.some((m) => m.text === "*Working…*"));
-  const card = h.messages.find((m) => m.text === "*Working…*");
+  await h.until(() => h.messages.some((m) => /\*Working…\*/.test(m.text ?? "")));
+  const card = h.messages.find((m) => /\*Working…\*/.test(m.text ?? ""));
   assert.ok(card);
   h.emit("session.tool.input.started", sessionID, undefined, {
     sessionID,
