@@ -51,6 +51,7 @@ flowchart LR
 | OpenCode container | Starts as root, `start-server` drops the server to `node` (uid 1000); `agent-shell` runs agent shells as `agent` (uid 1001). gVisor (`runsc`) by default. | `opencode serve` with the project at `/project`, uploads at `/inbox` (read-only) and its own `/data` volume. Hand-made channels use `deploy/compose.yaml`; registered ones use `deploy/project.yaml`. |
 | key-proxy container | uid 1000, read-only, no capabilities | Swaps the placeholder key for the real model key and forwards only to `https://opencode.ai/zen/go/v1`. One per registered project; one shared by hand-made projects. |
 | Safety plugin (`plugin/`) | Inside the server process | Decides permission requests (policy version 3), strips secrets from agent shells, reports its policy version over RPC. |
+| git-proxy container (optional) | uid 1000, read-only, no capabilities | Holds the host GitHub token; forwards one repository's Git traffic and, when enabled, its pull request calls. See [Git proxy](git-proxy.md). |
 | Host firewall (`deploy/firewall.sh`) | root, `slack-tag-firewall.service` | Drops traffic from `st-*` bridges to `169.254.0.0/16` and to the host itself. |
 
 One channel maps to one project and one server; each thread is one session on it. Threads in a channel share the same files, and the bridge runs one prompt or server command at a time per project. See [project mapping](project-mapping.md).
@@ -147,12 +148,22 @@ One channel maps to one project and one server; each thread is one session on it
 | `deploy/firewall.sh` drops traffic from `st-*` networks to the cloud metadata range `169.254.0.0/16` and to the host itself; replies to the bridge's own connections still pass. | **Real** (SEC-5, Docker-in-Docker) |
 | Other internet access stays open by decision (no egress allowlist). | By design (SEC-5, 2026-10-02) |
 
+### Agent → GitHub (Git proxy)
+
+| Control | Status |
+| --- | --- |
+| The agent container gets Git URL rewrites and `GIT_PROXY_URL`, never a token. The proxy forwards Git smart HTTP for its one repository; pushes need `GIT_ALLOW_PUSH=1`. | **Live** for fetch and push (2026-10-14, see findings); `GIT_PROXY_URL` **Configured**; Git coverage is issue #36 |
+| With `GIT_ALLOW_PULL_REQUESTS=1` the proxy also allows reading the default branch, finding the open pull request for a `jeff/*` head and opening one from a `jeff/*` head into a different base, forwarding only title, body, head and base. Other repositories, endpoints, query parameters and fields are refused. | **Tested**; **Real** through OpenCode 2.0.15 with a fake GitHub |
+| Caller credentials are replaced, redirects are not followed, bodies are capped at 64 KiB, GitHub errors become a generic `502` and replies keep only the default branch, pull request URL and number, so neither the token nor a temporary clone token reaches the agent or the logs. | **Tested** |
+| `open_pull_request` asks no one, because plugin tools never reach the permission hook. Its branch checks are a convenience; the proxy is the boundary, since the agent can call it directly. Pull requests are authored by the host account and may run the repository's pull request workflows, as pushes already can. | **Real**; by design |
+
 ## Secrets inventory
 
 | Secret | Stored in | Who can read it |
 | --- | --- | --- |
 | Slack bot and app tokens | `/etc/slack-tag/bridge.env` | root, the bridge process |
 | Model key (`OPENCODE_API_KEY`) | `/etc/slack-tag/proxy.env` | root, the key-proxy containers |
+| Host GitHub token | The host `gh` login, read at startup into the git-proxy container's environment | root, Docker, the git-proxy container |
 | Hand-made channel server passwords | `bridge.env` (as each channel's `passwordEnv`) and that project's env file | root, the bridge, that project's server (uid 1000) |
 | Registered project server passwords | `<state dir>/projects/<name>.env`, `0600` | The bridge user, that project's server |
 | Thread → session map | `slack-tag.sqlite` | The bridge user (state folder `0700`) |
