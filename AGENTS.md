@@ -43,6 +43,7 @@ Only after explicit authorization (see Ask First). Commands and migrations are i
 
 - `architecture.md`, `opencode-interface.md`, and original `docs/plan.md` prompts are historical. Current deployment mapping is in `docs/project-mapping.md`.
 - The bridge imports the plugin RPC definition directly; install both packages before checking or starting it.
+- OpenCode's catalog can override provider-level `settings.baseURL` with a model-specific URL. Keep deployed models explicitly routed through `key-proxy` in `deploy/opencode.global.jsonc`; verify proxy traffic after catalog/image refreshes.
 
 ## Coding Style
 
