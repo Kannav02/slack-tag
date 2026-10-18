@@ -57,7 +57,8 @@ createServer((req, res) => {
     const body = raw ? JSON.parse(raw) : {}
     const step = plan(body)
     const user = textOf(body.messages?.findLast((m) => m.role === "user")?.content)
-    if (log) appendFileSync(log, JSON.stringify({ url: req.url, headers: req.headers, tools: body.tools?.map((t) => t.function?.name), user, step }) + "\n")
+    const system = (body.messages ?? []).filter((m) => m.role === "system").map((m) => textOf(m.content))
+    if (log) appendFileSync(log, JSON.stringify({ url: req.url, headers: req.headers, tools: body.tools?.map((t) => t.function?.name), user, system, step }) + "\n")
 
     const id = `mock-${Date.now()}`
     if (!body.stream) {

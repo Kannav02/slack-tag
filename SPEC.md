@@ -68,7 +68,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 - Routing identifies the Slack workspace, channel, and thread and associates them with the backend session and project.
 - Persist both routing associations and the agent's session data. Persisting only a session identifier is insufficient if backend history is lost.
 - Restart recovery means the conversation can resume. It does not promise that an in-flight command continues or is automatically replayed.
-- Each new session starts in its configured project folder and uses project instructions supported by the backend. Folder access does not mean every file is eagerly loaded into the model context.
+- Each new session starts in its configured project folder and uses project instructions supported by the backend. Folder access does not mean every file is eagerly loaded into the model context. In a per-thread worktree the backend's project config, and with it its automatic `AGENTS.md` loading, is disabled for isolation, so the safety plugin reads `AGENTS.md` and supplies it instead.
 - No automatic ingestion of channel history, other thread histories, or cross-project knowledge. Files written by another session remain visible because the project folder is shared.
 
 ### Project server lifecycle

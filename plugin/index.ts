@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { Plugin } from "@opencode/plugin";
+import { readAgentsMd } from "./src/agents.ts";
 import { attach, take } from "./src/attach.ts";
 import { fix } from "./src/fix.ts";
 import { fastForwardPulls, safeDecide, stripSecrets } from "./src/policy.ts";
@@ -40,18 +41,23 @@ export default Plugin.define({
     });
     // In the container image, agent shells run as a separate user that cannot read the server's secrets.
     const agentShell = existsSync(AGENT_SHELL);
+    const shell = agentShell ? AGENT_SHELL : "/bin/sh";
     await ctx.shell.hook("create.before", (input) => {
       stripSecrets(input.env);
       fastForwardPulls(input.env);
       if (agentShell) input.shell = AGENT_SHELL;
     });
-    await attach(ctx, agentShell ? AGENT_SHELL : "/bin/sh");
+    await attach(ctx, shell);
     await fix(ctx);
+    // A worktree server has project config disabled, so OpenCode no longer auto-loads AGENTS.md (#57).
+    // Read it once at startup, before any agent turn can edit its own worktree copy, and add it below.
+    const agents = await readAgentsMd(shell, ctx.location?.directory);
     // Slack threads are shared: tell the model several people may write, each message tagged by the bridge.
     await ctx.session.hook("context", (input) => {
       input.system.push({ type: "text", text: MULTIPLAYER });
       input.system.push({ type: "text", text: SCREENSHOT });
       if (process.env.GIT_PROXY_URL) input.system.push({ type: "text", text: PULL_REQUESTS });
+      if (agents) input.system.push({ type: "text", text: agents });
     });
   },
 });
