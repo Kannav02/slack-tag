@@ -128,8 +128,8 @@ One channel maps to one project and one server; each thread is one session on it
 
 | Control | Status |
 | --- | --- |
-| Policy version 3: reads, project edits and a named list of single shell commands run without asking; everything else, including chained or piped commands and web access, asks the owner in Slack. See `SPEC.md`. | **Tested**, **Real** (SEC-2) |
-| Always refused: `git push` in any form, `sudo`/`su`/`doas`, download-and-run, edits to protected config or anywhere in `.git` (normalized, so `..` cannot escape the check), and shell commands that move, copy, delete or redirect into a `.git` path (#60). Git's own subcommands are unaffected. | **Tested** (SEC-2, #52, #60) |
+| Policy version 3: reads, project edits and a named list of shell commands run without asking when every command OpenCode sends is safe (it sends one resource per command of a chain, pipeline or background job). The list covers harmless output redirections, `$?`, read-only Git, plain `git pull` (fast-forward only) and `curl` to localhost without file, proxy or redirect flags. Everything else, including redirection to files, substitutions, other `curl` and web access, asks the owner in Slack. See `SPEC.md`. | **Tested**, **Real** (SEC-2, #38, and #40 with `spike/v2/policy.sh`) |
+| Always refused: force pushes (also with `2>&1` before the flag), `sudo`/`su`/`doas`, download-and-run (also from localhost), edits to protected config or anywhere in `.git` (normalized, so `..` cannot escape the check), and shell commands that move, copy, delete or redirect into a `.git` path (#60). Git's own subcommands are unaffected. | **Tested** (SEC-2, #40, #52, #60) |
 | No answer within the timeout, a plugin error, or a missing plugin never allows. | **Tested** (SEC-2) |
 | Requests from subagent sessions go to the nearest mapped ancestor's thread; requests with no mapped ancestor are rejected at once. | **Tested** (SEC-2) |
 | Subagent permission requests are not re-posted after a bridge restart. | **Gap**: SEC-2 follow-up |

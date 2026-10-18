@@ -27,6 +27,10 @@ const COMPOUND = /[;&|<>`\r\\$(){}]/;
 const DOWNLOAD = /\b(curl|wget)\b/;
 const RUNS_DOWNLOAD =
   /\|\s*(sudo\s+)?(\S*\/)?(ba|z|da|k)?sh\b|\|\s*(\S*\/)?(python3?|node|perl|ruby|eval|source)\b|<\(\s*(curl|wget)\b|\$\(\s*(curl|wget)\b|`\s*(curl|wget)\b/;
+// curl may only fetch from the agent's own server, without flags that touch files, send data or
+// change the target (redirects, proxies, sockets, resolving).
+const CURL_LOCAL_URL = /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/[^\s@]*)?$/;
+const CURL_FLAG = /^(-[sSfiIvk]+|--(silent|show-error|fail|include|head|verbose|insecure))$/;
 const ESCALATE = new Set(["sudo", "su", "doas"]);
 const WRAPPERS = new Set(["env", "command", "exec", "nohup", "time", "nice", "xargs", "builtin"]);
 // A `.git` path as a whole component, so `.git`, `.git/config`, `/project/.git` and `a/.git/b` match,
@@ -50,7 +54,7 @@ const GIT_VALUE_OPTIONS = new Set([
 
 const READ_ONLY = new Set(["ls", "cat", "head", "tail", "wc", "pwd", "echo", "grep", "cut", "tr"]);
 // Merging or discarding output cannot write a file, and `$?` always expands to a number.
-const HARMLESS_REDIRECT = /(^|\s)([12]?>&[12]|[12&]?>>?\s*\/dev\/null|<\s*\/dev\/null)(?=\s|$)/g;
+const HARMLESS_REDIRECT = /(^|\s)([12]?>&[12]|[12]?>>?\s*\/dev\/null|<\s*\/dev\/null)(?=\s|$)/g;
 const GIT_SAFE = new Set([
   "status",
   "log",
@@ -265,6 +269,8 @@ function safeShell(command: string): boolean {
   if (!name || name.includes("/") || name.includes("=")) return false;
   if (name === "playwright") return sub === "screenshot" && safeScreenshot(rest);
   if (READ_ONLY.has(name)) return true;
+  // Waiting, for example for a background dev server to start, changes nothing.
+  if (name === "sleep") return true;
   // sort can write a file or run a compressor; uniq writes its second file argument.
   if (name === "sort")
     return (
@@ -277,7 +283,16 @@ function safeShell(command: string): boolean {
   if (name === "pytest" || name === "make" || name === "tsc") return true;
   if (name === "node") return sub === "--test";
   if (PACKAGE_MANAGERS.has(name)) return PACKAGE_SAFE.has(sub ?? "");
+  // `$?` is checked as 0 above, so it must not reach a curl address.
+  if (name === "curl") return !command.includes("$") && safeCurl(words.slice(1));
   return name === "git" && safeGit(sub ?? "", rest);
+}
+
+function safeCurl(args: string[]): boolean {
+  return (
+    args.some((arg) => CURL_LOCAL_URL.test(arg)) &&
+    args.every((arg) => CURL_LOCAL_URL.test(arg) || CURL_FLAG.test(arg))
+  );
 }
 
 // Relative paths resolve against the server's directory (/project); symlinks resolve when the path exists.
@@ -307,7 +322,8 @@ export function decide(action: string, resources: readonly string[], path?: unkn
   if (action === "shell") {
     // OpenCode splits chains and pipelines into one resource per command, so every part is checked.
     const command = resources.join(" | ");
-    if (denied(command)) return DENY;
+    // Dropping harmless redirections first keeps `2>&1` from splitting a force push from its flags.
+    if (denied(command.replace(HARMLESS_REDIRECT, "$1"))) return DENY;
     const commands = resources
       .flatMap((resource) => resource.split("\n"))
       .filter((part) => part.trim());

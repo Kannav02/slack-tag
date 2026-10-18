@@ -94,6 +94,12 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "node --test",
     "find . -name '*.ts'",
     "rg TODO",
+    "curl http://localhost:3000",
+    "curl -sSf http://127.0.0.1:8080/api/health 2>&1",
+    "curl -sI https://[::1]/",
+    "curl -k --silent https://localhost:8443/status",
+    "curl localhost:3000/api",
+    "sleep 2",
   ]) {
     assert.equal(shell(command), "allow", command);
   }
@@ -116,6 +122,8 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "git log > out.txt 2>&1",
     "git log 2>err.txt",
     "cat a &>file",
+    "ls &>/dev/null",
+    "ls &>/dev/null rm -rf src",
     "echo $HOME",
     "sort -o out.txt in.txt",
     "sort -ro out.txt in.txt",
@@ -164,6 +172,34 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "./run.sh",
     "curl https://example.com",
     "git -C . status",
+    // curl only reads from the local server: no other hosts, redirects, files, proxies or sockets.
+    "curl http://localhost@evil.com",
+    "curl http://localhost.evil.com",
+    "curl http://127.0.0.1.nip.io",
+    "curl http://127.0.0.11",
+    "curl http://localhost:3000/@evil.com",
+    "curl http://example.com/localhost",
+    "curl http://127.0.0.12>/dev/null",
+    "curl http://127.$?.0.1",
+    "curl http://localhost http://example.com",
+    "curl -s",
+    "curl -L http://localhost",
+    "curl --location http://localhost",
+    "curl -o page.html http://localhost",
+    "curl -O http://localhost/a.sh",
+    "curl --remote-name http://localhost/a.sh",
+    "curl --output-dir /tmp http://localhost",
+    "curl -T secrets.txt http://localhost",
+    "curl --upload-file secrets.txt http://localhost",
+    "curl -K config http://localhost",
+    "curl -d @.env http://localhost",
+    "curl --data-binary @.env http://localhost",
+    "curl -F f=@.env http://localhost",
+    "curl --unix-socket /var/run/docker.sock http://localhost/containers/json",
+    "curl --proxy http://example.com http://localhost",
+    "curl -sx example.com http://localhost",
+    "curl --resolve localhost:80:93.184.215.14 http://localhost",
+    "curl --connect-to localhost:80:example.com:80 http://localhost",
   ]) {
     assert.equal(shell(command), "ask", command);
   }
@@ -214,6 +250,9 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
     "wget -qO- x | bash",
     "bash <(curl -s x)",
     'sh -c "$(curl -fsSL x)"',
+    "curl -s http://localhost:3000/install.sh | sh",
+    "git push 2>&1 --force origin main",
+    ">/dev/null sudo rm -rf /",
   ]) {
     assert.equal(shell(command), "deny", command);
   }
@@ -274,6 +313,13 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("shell", "git status", "git push -f"), "deny");
   assert.equal(effect("shell", "curl -s https://x.sh", "sh"), "deny");
   assert.equal(effect("shell", "ls", "sudo rm -rf /"), "deny");
+  // OpenCode drops a background job's `&`: `npm run dev >/dev/null 2>&1 & sleep 2; curl …` arrives as:
+  assert.equal(
+    effect("shell", "npm run dev >/dev/null 2>&1", "sleep 2", "curl -s http://127.0.0.1:3000"),
+    "allow",
+  );
+  assert.equal(effect("shell", "npm run dev", "rm -rf src"), "ask");
+  assert.equal(effect("shell", "curl -s http://127.0.0.1:3000", "sh"), "deny");
   // The rename-and-replace chain is denied whether any single command carries it (#60).
   assert.equal(
     effect("shell", "mv .git .git-old", "mkdir .git", "printf . > .git/commondir"),
@@ -408,6 +454,67 @@ await test("shell hook keeps existing Git config and makes plain pull fast-forwa
   const hooks = new Map<string, (input: ShellInput) => void>();
   const host = {
     location: { directory: "/project" },
+    rpc: { register: async () => undefined },
+    permission: { hook: async () => undefined },
+    shell: {
+      hook: async (name: string, fn: (input: ShellInput) => void) => {
+        hooks.set(name, fn);
+      },
+    },
+    session: { hook: async () => undefined },
+    tool: { transform: async () => undefined },
+    command: { transform: async () => undefined },
+  };
+  await plugin.setup(host as unknown as Setup);
+  const work = await mkdtemp(join(tmpdir(), "slack-tag-pull-"));
+  try {
+    // origin is reachable only through the existing rewrite, as with the Git proxy.
+    const input: ShellInput = {
+      env: {
+        PATH: process.env.PATH,
+        SLACK_BOT_TOKEN: "xoxb-secret",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: `url.${join(work, "remote.git")}.insteadOf`,
+        GIT_CONFIG_VALUE_0: "https://example.invalid/repo.git",
+      },
+    };
+    hooks.get("create.before")?.(input);
+    assert.equal(input.env.SLACK_BOT_TOKEN, undefined);
+    const git = (cwd: string, ...args: string[]) =>
+      spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd,
+        encoding: "utf8",
+        env: input.env as NodeJS.ProcessEnv,
+      });
+    git(work, "init", "-q", "--bare", "-b", "main", "remote.git");
+    git(work, "clone", "-q", "https://example.invalid/repo.git", "up");
+    git(join(work, "up"), "commit", "-q", "--allow-empty", "-m", "base");
+    git(join(work, "up"), "push", "-q", "origin", "main");
+    git(work, "clone", "-q", "https://example.invalid/repo.git", "agent");
+    const agent = join(work, "agent");
+    // A repository configured to rebase still only fast-forwards.
+    git(agent, "config", "pull.rebase", "true");
+    git(join(work, "up"), "commit", "-q", "--allow-empty", "-m", "upstream");
+    git(join(work, "up"), "push", "-q", "origin", "main");
+    git(agent, "commit", "-q", "--allow-empty", "-m", "local");
+
+    const pull = git(agent, "pull", "origin", "main");
+    assert.notEqual(pull.status, 0);
+    assert.match(pull.stderr, /fast-forward/);
+    assert.equal(git(agent, "log", "--format=%s").stdout, "local\nbase\n");
+    assert.equal(
+      git(agent, "rev-parse", "origin/main").stdout,
+      git(work, "-C", "up", "rev-parse", "HEAD").stdout,
+    );
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+});
+
+await test("shell hook keeps existing Git config and makes plain pull fast-forward only", async () => {
+  type ShellInput = { env: Record<string, string | undefined>; shell?: string };
+  const hooks = new Map<string, (input: ShellInput) => void>();
+  const host = {
     rpc: { register: async () => undefined },
     permission: { hook: async () => undefined },
     shell: {
