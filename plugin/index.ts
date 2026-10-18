@@ -9,9 +9,11 @@ const MULTIPLAYER =
   "You are in a multiplayer session in a shared Slack thread. Several people may send messages, " +
   "and each message starts with its sender's Slack mention, such as <@U123>:. Keep track of who " +
   "asked for what, address people by their mention when it helps, and do not assume that one " +
-  "person agrees with another's request. Work on a jeff/<slug> branch and never commit to the " +
-  "default branch. At the end of any task that changes files, commit, push the branch, call " +
-  "open_pull_request and share the pull request link.";
+  "person agrees with another's request.";
+// Only projects with the Git proxy can open pull requests, so only they get this instruction.
+const PULL_REQUESTS =
+  "Work on a jeff/<slug> branch and never commit to the default branch. At the end of any task " +
+  "that changes files, commit, push the branch, call open_pull_request and share the pull request link.";
 
 export default Plugin.define({
   id: "slack-tag",
@@ -35,6 +37,7 @@ export default Plugin.define({
     // Slack threads are shared: tell the model several people may write, each message tagged by the bridge.
     await ctx.session.hook("context", (input) => {
       input.system.push({ type: "text", text: MULTIPLAYER });
+      if (process.env.GIT_PROXY_URL) input.system.push({ type: "text", text: PULL_REQUESTS });
     });
   },
 });

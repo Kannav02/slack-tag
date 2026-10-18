@@ -180,8 +180,15 @@ await test("context hook tells the model the session is multiplayer", async () =
   };
   await plugin.setup(host as unknown as Setup);
   const input: Context = { system: [{ type: "text", text: "base prompt" }] };
+  delete process.env.GIT_PROXY_URL;
   hooks.get("context")?.(input);
   assert.equal(input.system[0]?.text, "base prompt");
   assert.match(input.system[1]?.text ?? "", /multiplayer session/);
-  assert.match(input.system[1]?.text ?? "", /jeff\/<slug> branch.*open_pull_request/s);
+  assert.doesNotMatch(JSON.stringify(input.system), /open_pull_request/);
+  // Projects with the Git proxy are also told to finish every task with a pull request.
+  process.env.GIT_PROXY_URL = "http://git-proxy:8081";
+  const proxied: Context = { system: [] };
+  hooks.get("context")?.(proxied);
+  delete process.env.GIT_PROXY_URL;
+  assert.match(proxied.system[1]?.text ?? "", /jeff\/<slug> branch.*open_pull_request/s);
 });
