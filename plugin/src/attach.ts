@@ -11,11 +11,26 @@ const IMAGE = /^(png|jpe?g|gif|webp)$/;
 // An image must start with its format's signature, compared as hex; text must hold no NUL byte.
 const SIGNATURE =
   /^(png:89504e470d0a1a0a|jpe?g:ffd8ff|gif:474946383[79]61|webp:52494646.{8}57454250)/;
-// Runs as the agent's own user. The real path must equal the requested one, so no symlink is on the way,
-// and only a regular file is read, up to one byte past the limit. The server cannot signal the agent's
-// user, so the reader times itself out.
-const READ = `[ "$(realpath -e -- "$1")" = "$1" ] && [ -f "$1" ] && exec timeout 10 head -c ${MAX_BYTES + 1} -- "$1"`;
+// The real path ($1) must equal the requested one, so no symlink is on the way, and only a regular
+// file is read, up to $2 bytes. The server cannot signal the agent's user, so the reader times out.
+const READ = `[ "$(realpath -e -- "$1")" = "$1" ] && [ -f "$1" ] && exec timeout 10 head -c "$2" -- "$1"`;
 const run = promisify(execFile);
+
+// Reads a regular file as the agent's own user (the agent shell switches to uid 1001), up to `limit`
+// bytes; one more is fetched so a caller can tell a file that overflows its cap from one that fills
+// it. Throws if the path is a symlink, is not a regular file, or cannot be read. Because it runs as
+// the agent user with a bare environment, it can never reach a file the agent could not read itself.
+export async function readAsAgent(shell: string, path: string, limit: number): Promise<Buffer> {
+  // A bare environment, so even the reader's own /proc/self/environ holds no secret.
+  const env = { PATH: "/usr/local/bin:/usr/bin:/bin" };
+  const options = { encoding: "buffer", env, timeout: 15_000, maxBuffer: 2 * limit } as const;
+  const { stdout } = await run(
+    shell,
+    ["-c", READ, "slack_attach", path, String(limit + 1)],
+    options,
+  );
+  return stdout;
+}
 
 type Attachment = { sessionID: string; name: string; data: Buffer; caption?: string; at: number };
 // Accepted files wait until the bridge fetches them once; at most 8, for at most 10 minutes.
@@ -34,10 +49,7 @@ async function accept(shell: string, roots: string[], path: string) {
     throw new Error("Refused: only png, jpg, gif, webp, txt, log, md, json, csv, diff and patch.");
   if (!roots.some((root) => path.startsWith(`${root}/`)))
     throw new Error(`Refused: only files in ${roots.join(", ")} can be attached.`);
-  // A bare environment, so even the reader's own /proc/self/environ holds no secret.
-  const env = { PATH: "/usr/local/bin:/usr/bin:/bin" };
-  const options = { encoding: "buffer", env, timeout: 15_000, maxBuffer: 2 * MAX_BYTES } as const;
-  const { stdout } = await run(shell, ["-c", READ, "slack_attach", path], options).catch(() => {
+  const stdout = await readAsAgent(shell, path, MAX_BYTES).catch(() => {
     throw new Error("Refused: not a readable regular file, or a symlink is on its path.");
   });
   if (!stdout.length || stdout.length > MAX_BYTES)
