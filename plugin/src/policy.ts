@@ -11,7 +11,8 @@ const ASK: Decision = { effect: "ask" };
 const DENY: Decision = { effect: "deny", message: "Blocked by the safety plugin" };
 const READ = new Set(["read", "glob", "grep", "list", "search"]);
 const EDIT = new Set(["edit", "write", "patch"]);
-// Anything in .git (or a .git file) can redirect Git run by the server, for example .git/commondir.
+// Anything in .git (or a .git file — including a worktree's .git pointer and .git/worktrees/) can
+// redirect Git run by the server, for example .git/commondir.
 const PROTECTED = /(^|\/)(\.opencode(\/|$)|opencode\.jsonc?$|\.git(\/|$))/;
 const DOTENV = /(^|\/)\.env(\.|$)/;
 const SECRET = /OPENCODE_API_KEY|OPENCODE_SERVER_PASSWORD|SLACK_/;

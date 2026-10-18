@@ -12,6 +12,10 @@ export type StoredChannel = {
   passwordFile?: string;
   model: string;
   serverInboxDir?: string;
+  // When true, each new thread runs in its own Git worktree on a jeff/<slug> branch (see docs/project-mapping.md).
+  // The server must disable project config (OPENCODE_CONFIG_PROJECT_DISABLE); otherwise worktree creation fails
+  // and the thread falls back to the shared /project checkout.
+  worktrees?: boolean;
   // Slack users who may approve or reject actions in this channel's threads, besides the owner.
   approvers?: string[];
 };

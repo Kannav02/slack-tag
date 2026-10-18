@@ -109,6 +109,14 @@ systemctl restart slack-tag
 
 Check out the previous commit in `/opt/slack-tag` and run the update steps. To stop everything, run `systemctl disable --now slack-tag` and `docker compose -f deploy/compose.yaml down`. The data volumes stay, so sessions survive.
 
+## Per-thread worktrees (opt-in)
+
+Gives each new Slack thread its own Git worktree on a `jeff/<slug>` branch so threads run concurrently (see [project mapping](project-mapping.md)). Enable it per project; the behaviour and the isolation hold only with all three steps.
+
+1. Mount a writable volume for worktrees on the project's OpenCode service at `/worktrees` (e.g. add a `worktrees-data:/worktrees` volume to its `compose.yaml`/`project.yaml` service and declare it; it must not be `read_only`). `start-server` makes it group-1000-writable with the setgid bit so agent shells can edit worktree files. Worktrees live here, outside the `/project` bind mount.
+2. Set `OPENCODE_CONFIG_PROJECT_DISABLE=1` and `SLACK_TAG_WORKTREE_DIR=/worktrees` in that server's environment. `OPENCODE_CONFIG_PROJECT_DISABLE` stops OpenCode loading agent-controlled config or plugins from a worktree checkout (required for safety; it also turns off AGENTS.md auto-loading on that server). The server's git hardening (`core.fsmonitor=false`, `core.hooksPath=/dev/null`) is applied by `start-server` and needs no configuration.
+3. Add `"worktrees": true` to the channel in `config.json` and restart the bridge. If the server lacks step 2 the plugin refuses and threads fall back to `/project`, so apply 1–2 before 3.
+
 ## Private GitHub repositories (opt-in)
 
 For the request flow, URL rewriting and credential boundary, see [Git proxy](git-proxy.md).

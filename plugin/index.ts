@@ -5,6 +5,7 @@ import { fix } from "./src/fix.ts";
 import { fastForwardPulls, safeDecide, stripSecrets } from "./src/policy.ts";
 import { pullRequestTool } from "./src/pull-request.ts";
 import { definition, status } from "./src/rpc.ts";
+import { createWorktree } from "./src/worktree.ts";
 
 const AGENT_SHELL = "/usr/local/bin/agent-shell";
 const MULTIPLAYER =
@@ -27,6 +28,7 @@ export default Plugin.define({
   async setup(ctx) {
     await ctx.rpc.register(definition, {
       status: async () => status(),
+      worktree: async (input) => createWorktree((input as { slug: string }).slug),
       attachment: async (input) => take(input as { sessionID: string; id: string }),
     });
     // Plugin tools never reach the permission hook, so opening a pull request asks no one.

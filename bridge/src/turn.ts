@@ -7,6 +7,7 @@ import {
   pluginReady,
   prompt,
   sessionModel,
+  worktreeDir,
   type AgentEvent,
   type Client,
   type Permission,
@@ -31,6 +32,12 @@ const EDIT_MS = 1000;
 // The progress card re-renders on this cadence so the spinner keeps moving between agent events. It
 // sits above EDIT_MS, so each tick clears the edit throttle and lands as one rate-limited chat.update.
 const SPIN_MS = 1200;
+
+// A filesystem- and branch-safe name for a thread's worktree, derived from its Slack thread timestamp.
+const slugOf = (threadTs: string) => threadTs.replace(/[^A-Za-z0-9]+/g, "-");
+// Threads run concurrently when their sessions use different directories, but share one queue per project
+// directory, so a project's own checkout (/project) and each worktree each get their own ordered queue.
+const queueKey = (projectDir: string, directory: string) => `${projectDir}\0${directory}`;
 
 export type SlackApi = {
   post: (channel: string, threadTs: string, text: string, blocks?: object[]) => Promise<string>;
@@ -303,9 +310,9 @@ export function createRouter(
     await slack.update(run.channelId, card, text, blocks(text));
   }
 
-  const queueOf = (projectDir: string) => {
-    if (!queues.has(projectDir)) queues.set(projectDir, { jobs: [] });
-    return queues.get(projectDir)!;
+  const queueOf = (key: string) => {
+    if (!queues.has(key)) queues.set(key, { jobs: [] });
+    return queues.get(key)!;
   };
 
   async function pump(queue: Queue) {
@@ -343,8 +350,8 @@ export function createRouter(
     }
   }
 
-  async function enqueue(projectDir: string, job: Job) {
-    const queue = queueOf(projectDir);
+  async function enqueue(key: string, job: Job) {
+    const queue = queueOf(key);
     queue.jobs.push(job);
     const ahead = queue.jobs.length - 1 + (queue.running ? 1 : 0);
     if (ahead)
@@ -358,10 +365,11 @@ export function createRouter(
 
   // Recovers from a lost completion event, such as an event stream drop or an OpenCode restart.
   async function unstick() {
-    for (const [projectDir, queue] of queues) {
+    for (const queue of queues.values()) {
       const running = queue.running;
       if (!running || Date.now() - running.startedAt < STALE_MS) continue;
-      const runtime = [...channels.values()].find((r) => r.channel.projectDir === projectDir);
+      const thread = db.threadBySession(running.sessionId);
+      const runtime = thread && channels.get(thread.channel_id);
       const active = runtime && (await runtime.client.session.active().catch(() => undefined));
       if (active && !(running.sessionId in active) && queue.running === running)
         release(running.sessionId);
@@ -534,13 +542,21 @@ export function createRouter(
     if (!runtime.available) return say("The project environment is unavailable.");
 
     const { client, channel } = runtime;
+    let startedDir: string | undefined;
     const start = async (model: string) => {
-      const id = await createSession(client, channel.serverDir, model);
+      // A worktree-enabled channel runs each new thread in its own worktree; if the server cannot create
+      // one safely (project config not disabled, or an older server), fall back to the shared checkout.
+      const worktree = channel.worktrees ? await worktreeDir(client, slugOf(threadTs)) : undefined;
+      if (channel.worktrees && !worktree)
+        console.error(`channel ${m.channelId}: worktree unavailable, using ${channel.serverDir}`);
+      startedDir = worktree ?? channel.serverDir;
+      const id = await createSession(client, startedDir, model);
       db.addThread({
         team_id: m.teamId,
         channel_id: m.channelId,
         thread_ts: threadTs,
         session_id: id,
+        directory: startedDir,
       });
       return id;
     };
@@ -560,9 +576,10 @@ export function createRouter(
     for (const file of m.files) files.push(await store(channel, threadTs, file, slack.download));
 
     const sessionId = thread?.session_id ?? (await start(channel.model));
+    const directory = thread?.directory ?? startedDir ?? channel.serverDir;
     // Several people can share a thread, so the agent sees who sent each prompt. Command arguments stay as typed.
     const text = cmd ? cmd.args : `<@${m.userId}>: ${m.text.trim() || "sent the attached files."}`;
-    await enqueue(channel.projectDir, {
+    await enqueue(queueKey(channel.projectDir, directory), {
       client,
       sessionId,
       channelId: m.channelId,

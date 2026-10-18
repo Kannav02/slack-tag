@@ -335,6 +335,10 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("edit", "/project/../etc/passwd"), "ask");
   assert.equal(effect("write", "/project/opencode.json"), "deny");
   assert.equal(effect("edit", "/project/.git/hooks/pre-commit"), "deny");
+  // A worktree's git metadata must not be redirected at an agent-controlled config.
+  assert.equal(effect("write", "/worktrees/jeff-x/.git"), "deny");
+  assert.equal(effect("edit", "/project/.git/worktrees/jeff-x/commondir"), "deny");
+  assert.equal(effect("edit", "/project/src/release.git/notes"), "allow");
   // Any Git data can redirect the server's Git, for example .git/commondir (#52).
   for (const path of [
     "/project/.git/commondir",

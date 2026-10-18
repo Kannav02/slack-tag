@@ -66,6 +66,20 @@ export async function createSession(
   ).id;
 }
 
+// Asks the safety plugin (running in the server) to create this thread's worktree on its jeff/<slug> branch.
+// Returns the worktree directory, or undefined if the server cannot create one safely (the caller then
+// falls back to the shared project checkout).
+export async function worktreeDir(client: Client, slug: string): Promise<string | undefined> {
+  try {
+    const { directory } = (await client.rpc(definition).worktree({ slug })) as {
+      directory: string;
+    };
+    return directory;
+  } catch {
+    return undefined;
+  }
+}
+
 // OpenCode loads its model catalog in the background and lists no models until it finishes,
 // so an empty list is retried for a few seconds before it is believed.
 async function catalog(client: Client) {

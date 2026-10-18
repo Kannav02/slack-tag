@@ -1,6 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 
-export type Thread = { team_id: string; channel_id: string; thread_ts: string; session_id: string };
+export type Thread = {
+  team_id: string;
+  channel_id: string;
+  thread_ts: string;
+  session_id: string;
+  // The session's working directory. NULL for threads mapped before per-thread worktrees; those keep /project.
+  directory?: string | null;
+};
 export type Reply = { message_ts: string; channel_id: string };
 export type ApprovalState = "pending" | "approved" | "rejected" | "expired";
 export type Approval = {
@@ -23,6 +30,14 @@ export function openDb(path: string) {
       session_id TEXT NOT NULL, created_at TEXT NOT NULL,
       PRIMARY KEY (team_id, channel_id, thread_ts)
     );
+  `);
+  // Added with per-thread worktrees; older databases keep their rows with a NULL directory (the /project checkout).
+  try {
+    db.exec("ALTER TABLE threads ADD COLUMN directory TEXT");
+  } catch {
+    // Column already exists.
+  }
+  db.exec(`
     CREATE TABLE IF NOT EXISTS replies (
       message_ts TEXT PRIMARY KEY, session_id TEXT NOT NULL, channel_id TEXT NOT NULL, state TEXT NOT NULL
     );
@@ -51,12 +66,13 @@ export function openDb(path: string) {
       all<Thread>("SELECT * FROM threads WHERE channel_id = ?", channelId),
     addThread: (t: Thread) =>
       run(
-        "INSERT INTO threads VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO threads (team_id, channel_id, thread_ts, session_id, created_at, directory) VALUES (?, ?, ?, ?, ?, ?)",
         t.team_id,
         t.channel_id,
         t.thread_ts,
         t.session_id,
         new Date().toISOString(),
+        t.directory ?? null,
       ),
 
     addReply: (messageTs: string, sessionId: string, channelId: string) =>

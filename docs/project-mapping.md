@@ -13,7 +13,13 @@ flowchart LR
     SB --> FB[Shared project B files]
 ```
 
-Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner replies in it continue the same session without another mention. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. To keep edits from colliding, the bridge runs one prompt at a time per project and queues the rest in arrival order; there are no worktrees per thread.
+Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner replies in it continue the same session without another mention. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. To keep edits from colliding, the bridge runs one prompt at a time per working directory and queues the rest in arrival order.
+
+## Per-thread worktrees (opt-in)
+
+A channel with `"worktrees": true` in `config.json` gives each **new** thread its own Git worktree on a `jeff/<slug>` branch (the slug is derived from the thread timestamp), created inside the project container. Those threads run concurrently — one queue per worktree instead of one per project — and their edits no longer collide in the shared checkout. Threads mapped before the channel was switched on keep the shared `/project` checkout and still take turns there; there is no migration. The OpenCode session is created with `location` pointing at the worktree, so `/stop`, `/compact`, `/model`, approvals, progress cards and uploads work unchanged.
+
+The worktree is created by the safety plugin in the server (the bridge never writes to a project folder), via `git worktree add -b jeff/<slug>` under `SLACK_TAG_WORKTREE_DIR`, outside `/project`, so worktrees never appear as untracked files in the main checkout. Removing merged worktrees, per-thread dev-server ports, and opening pull requests are out of scope. Enabling worktrees requires the server-side settings in [deployment](deploy.md); if they are missing the plugin refuses and the thread falls back to `/project`.
 
 ## Where the mapping lives
 

@@ -16,6 +16,21 @@ export const definition = Rpc.define({
         required: ["pluginVersion", "policyVersion"],
       },
     },
+    // Creates a per-thread Git worktree on a jeff/<slug> branch and returns its directory.
+    worktree: {
+      input: {
+        type: "object",
+        additionalProperties: false,
+        properties: { slug: { type: "string" } },
+        required: ["slug"],
+      },
+      output: {
+        type: "object",
+        additionalProperties: false,
+        properties: { directory: { type: "string" } },
+        required: ["directory"],
+      },
+    },
     // A file slack_attach accepted, by the ID in its tool metadata, as base64. Empty once fetched or
     // expired, and for any other session.
     attachment: {
