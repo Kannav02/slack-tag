@@ -357,6 +357,8 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("edit", "/project/.gitignore"), "allow");
   assert.equal(effect("edit", "/project/.github/workflows/ci.yml"), "allow");
   assert.equal(effect("webfetch", "https://example.com"), "ask");
+  // OpenCode sends the search query as the resource.
+  assert.equal(effect("websearch", "opencode release notes"), "allow");
   assert.equal(effect("external_directory", "/etc"), "ask");
   assert.equal(effect("shell"), "ask");
   assert.equal(effect("edit", null), "ask");

@@ -26,6 +26,9 @@ function plan(body) {
   // `ATTACH: <json>` calls the safety plugin's slack_attach tool with those arguments.
   const attach = textOf(lastUser?.content).match(/ATTACH: (.+)/)
   if (attach) return { tool: { name: "slack_attach", args: JSON.parse(attach[1]) } }
+  // `SEARCH: <query>` calls OpenCode's built-in websearch tool.
+  const search = textOf(lastUser?.content).match(/SEARCH: (.+)/)
+  if (search) return { tool: { name: "websearch", args: { query: search[1].trim() } } }
   const shell = (body.tools ?? []).find((t) => ["shell", "bash"].includes(t.function?.name))
   if (runs[done] && shell) {
     const props = Object.keys(shell.function.parameters?.properties ?? {})

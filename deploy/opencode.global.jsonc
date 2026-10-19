@@ -4,6 +4,8 @@
   "plugins": ["../plugin"],
   // Model requests go through the key-proxy service, which holds the real Go key.
   "providers": { "opencode-go": { "settings": { "baseURL": "http://key-proxy:8080/v1" } } },
+  // A chosen provider stops web search from asking for one through a form the bridge cannot answer.
+  "websearch": { "provider": "random" },
   // Without the safety plugin, anything beyond reading asks the owner.
   "permissions": [
     { "action": "read", "resource": "*", "effect": "allow" },
