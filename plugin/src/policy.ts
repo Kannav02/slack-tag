@@ -264,12 +264,73 @@ function safeScreenshot(args: string[]): boolean {
   );
 }
 
+// Documents (DOC-1): pandoc and pdftotext read uploads in /inbox, /tmp, /project or the working folder
+// and write to /tmp, /project or the working folder. Paths are plain words with no `..`, dot folders or
+// `:`, so URLs (pandoc fetches them), `~` and other folders ask.
+const DOC_READ = /^(\/(inbox|tmp|project)\/)?(\w[\w.-]*\/)*\w[\w.-]*$/;
+const DOC_WRITE = /^(\/(tmp|project)\/)?(\w[\w.-]*\/)*\w[\w.-]*$/;
+// Built-in formats only: a .lua reader or writer runs code, and pdf runs an external PDF engine.
+const PANDOC_FORMAT = /^[a-z0-9_]+([+-][a-z0-9_]+)*$/;
+const PANDOC_SWITCH = /^(-s|--standalone|--wrap=(auto|none|preserve))$/;
+const writable = (path: string) => DOC_WRITE.test(path) && !PROTECTED.test(path);
+
+// Every other option, such as --filter, --lua-filter, --defaults, --data-dir or --template (which run
+// programs or read other files), lands in inputs, where DOC_READ refuses it. Abbreviations such as
+// --out ask too. `pandoc lua` and `pandoc server` (pandoc 3) run Lua or a web server.
+function safePandoc(args: string[]): boolean {
+  if (args[0] === "lua" || args[0] === "server") return false;
+  // `--from=docx` is the same as `--from docx`.
+  const words = args.flatMap((word) =>
+    /^--(from|to|output)=/.test(word)
+      ? [word.slice(0, word.indexOf("=")), word.slice(word.indexOf("=") + 1)]
+      : [word],
+  );
+  const inputs: string[] = [];
+  const formats: string[] = [];
+  const outputs: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    if (/^(-f|--from|-t|--to)$/.test(word)) formats.push(words[++i] ?? "");
+    else if (word === "-o" || word === "--output") outputs.push(words[++i] ?? "");
+    else if (!PANDOC_SWITCH.test(word)) inputs.push(word);
+  }
+  return (
+    inputs.length > 0 &&
+    inputs.every((path) => DOC_READ.test(path)) &&
+    formats.every((format) => PANDOC_FORMAT.test(format) && format.split(/[+-]/)[0] !== "pdf") &&
+    outputs.length <= 1 &&
+    outputs.every((path) => writable(path) && !/\.pdf$/i.test(path))
+  );
+}
+
+// One PDF and an optional output (`-` is stdout); other options land in files and fail the path
+// checks. Without an output pdftotext writes <name>.txt beside the PDF, never in a dot folder.
+function safePdftotext(args: string[]): boolean {
+  const files: string[] = [];
+  const pages: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const word = args[i]!;
+    if (word === "-f" || word === "-l") pages.push(args[++i] ?? "");
+    else if (word !== "-layout" && word !== "-nopgbrk") files.push(word);
+  }
+  const [input = "", output, ...extra] = files;
+  return (
+    pages.every((page) => /^\d+$/.test(page)) &&
+    extra.length === 0 &&
+    DOC_READ.test(input) &&
+    /\.pdf$/i.test(input) &&
+    (output === undefined || output === "-" || writable(output))
+  );
+}
+
 function safeShell(command: string): boolean {
   const words = shellWords(command.replace(HARMLESS_REDIRECT, "$1").replace(/\$\?/g, "0"));
   if (!words) return false;
   const [name, sub, ...rest] = words;
   if (!name || name.includes("/") || name.includes("=")) return false;
   if (name === "playwright") return sub === "screenshot" && safeScreenshot(rest);
+  if (name === "pandoc") return safePandoc(words.slice(1));
+  if (name === "pdftotext") return safePdftotext(words.slice(1));
   if (READ_ONLY.has(name)) return true;
   // Waiting, for example for a background dev server to start, changes nothing.
   if (name === "sleep") return true;

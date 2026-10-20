@@ -96,6 +96,7 @@ The unit runs the bridge as `slack-tag` (not uid 1000, the container user). Only
 
      Then continue with step 2. To roll back, reinstall the previous unit (and the override, if any) and `chown -R` `/var/lib/slack-tag` back to the old user.
    - Upgrading to app screenshots ([#43](https://github.com/Kannav02/slack-tag/issues/43)): the image adds Playwright 1.56.1 and Chromium headless shell 141.0.7390.37 with its Debian libraries and fonts, about 0.65 GB (estimated). Step 2 rebuilds it; the build also downloads the browser from `cdn.playwright.dev`. Then run `systemctl start slack-tag-project@<name>.service` for each registered project so its container is recreated on the new image. Compose and env files do not change.
+   - Upgrading to document uploads (DOC-1): the image adds `pandoc` and `poppler-utils` (`pdftotext`), about 0.2 GB (estimated from Ubuntu 24.04's installed sizes, almost all of it pandoc 3.1.3 at 190 MB; bookworm ships pandoc 2.17, so the real figure differs). Rebuild the containers in the same update as the bridge: the bridge now tells the agent to read documents with these tools, and an older image has neither, while its plugin reports the same policy version 3 and asks before every conversion. Step 2 rebuilds the image; then run `systemctl start slack-tag-project@<name>.service` for each registered project. Compose and env files do not change.
 2. Rebuild the containers and restart the bridge. Do not replace the env files.
 
 ```bash

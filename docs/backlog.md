@@ -25,7 +25,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | CMD-3 | `/fix`: reproduce, fix and prove with evidence | Medium | Merged ([#55](https://github.com/Kannav02/slack-tag/pull/55)) |
 | GUEST-1 | Plain, concise replies | High | Approved; wave 1 |
 | GUEST-3 | Only messages that start with the bot mention reach the agent | High | Approved; wave 1; [#27](https://github.com/Kannav02/slack-tag/issues/27) |
-| DOC-1 | Word and PDF files in | High | Approved; wave 1 |
+| DOC-1 | Word and PDF files in | High | Implemented; not deployed |
 | DOC-2 | Word and PDF files out | High | Approved; wave 1 |
 | GUEST-4 | Stop button on the progress card | Medium | Approved; wave 2 |
 | GUEST-5 | Welcome message and `help`: models, commands and proof | Medium | Approved; wave 2 |

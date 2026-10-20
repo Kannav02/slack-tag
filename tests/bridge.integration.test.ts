@@ -133,6 +133,7 @@ async function harness(
         .writeHead(302, { location: `${base.replace("127.0.0.1", "localhost")}/steal` })
         .end();
     if (path === "/files/note.txt") return res.end("uploaded note");
+    if (/^\/files\/\w+\.(docx|odt|epub|pdf)$/.test(path)) return res.end(`bytes of ${path}`);
     if (path === "/api/rpc/slack-tag/status")
       return json({ output: { pluginVersion: "test", policyVersion: 3 } });
     if (path === "/api/rpc/slack-tag/worktree") {
@@ -1375,6 +1376,55 @@ await test(
     assert.deepEqual(h.unexpected, []);
   },
 );
+
+await test("Word, ODT, EPUB and PDF uploads are stored in the inbox and named in the prompt, not sent to the model", async (t) => {
+  const h = await harness(t);
+  const upload = (name: string, mimetype: string, file = name) => ({
+    name,
+    mimetype,
+    size: 30,
+    url_private: `${h.base}/files/${file}`,
+  });
+  h.send({
+    ts: "700.1",
+    subtype: "file_share",
+    text: "<@UBOT> summarise these",
+    files: [
+      upload("My Draft.docx", "application/octet-stream", "draft.docx"),
+      upload("story.odt", "application/vnd.oasis.opendocument.text"),
+      upload("book", "application/epub+zip", "book.epub"),
+      upload("paper.pdf", "application/pdf"),
+      upload("note.txt", "text/plain"),
+    ],
+  });
+  await h.until(() => h.prompts.length === 1);
+  // Only the text file is model input; the documents stay in the read-only inbox for pandoc and pdftotext.
+  assert.deepEqual(h.prompts[0]?.files, [
+    { uri: "file:///inbox/700.1/note.txt", name: "note.txt" },
+  ]);
+  assert.equal(
+    h.prompts[0]?.text,
+    "<@UOWNER>: summarise these\nAttached documents (read them with pandoc or pdftotext): " +
+      "/inbox/700.1/My_Draft.docx, /inbox/700.1/story.odt, /inbox/700.1/book, /inbox/700.1/paper.pdf",
+  );
+  const inbox = join(h.state, "inbox", "test", "700.1");
+  const stored = (await readdir(inbox)).sort().join(" ");
+  assert.equal(stored, "My_Draft.docx book note.txt paper.pdf story.odt");
+  assert.equal(await readFile(join(inbox, "paper.pdf"), "utf8"), "bytes of /files/paper.pdf");
+
+  // Other types are still refused before download, and nothing reaches the agent.
+  h.send({ ts: "700.2", text: "<@UBOT> unpack", files: [upload("site.zip", "application/zip")] });
+  await h.until(() => h.messages.some((m) => m.thread_ts === "700.2"));
+  assert.equal(
+    h.messages.find((m) => m.thread_ts === "700.2")?.text,
+    "site.zip is not a supported attachment. This model accepts text, image. " +
+      "Documents (.docx, .odt, .epub, .pdf) are accepted with any model.",
+  );
+  assert.equal(h.prompts.length, 1);
+  assert.equal(h.sessions.length, 1);
+  assert.ok(!h.fetched.some((f) => f.path === "/files/site.zip"));
+  assert.deepEqual(h.unexpected, []);
+});
 
 await test("a worktree-enabled channel falls back to /project when the server refuses", async (t) => {
   const h = await harness(t, { worktrees: true });

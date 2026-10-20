@@ -1,7 +1,8 @@
 FROM node:22-bookworm-slim
 
+# pandoc and pdftotext (poppler-utils) read uploaded Word, ODT, EPUB and PDF files (plugin/src/policy.ts).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl \
+  && apt-get install -y --no-install-recommends git ca-certificates curl pandoc poppler-utils \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g @opencode/cli@2.0.15
 
