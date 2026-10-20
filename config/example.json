@@ -1,6 +1,10 @@
 {
   "ownerUserId": "U0123456789",
   "approvalTimeoutMinutes": 30,
+  "recommendedModels": [
+    { "model": "opencode-go/kimi-k2.7-code", "note": "best for hard tasks" },
+    { "model": "opencode-go/claude-haiku-5-5", "note": "fast, for everyday questions" }
+  ],
   "onboarding": {
     "projectsRoot": "/srv/slack-tag/projects",
     "model": "opencode-go/kimi-k2.7-code",

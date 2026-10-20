@@ -15,6 +15,8 @@ flowchart LR
 
 Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner replies in it continue the same session without another mention. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. To keep edits from colliding, the bridge runs one prompt at a time per working directory and queues the rest in arrival order.
 
+`@OpenCode help` (or `/help`) replies with a short guide without creating a session or reaching the model: how to ask, the thread's model and up to three recommended ones, every command, how the agent shows its work, and who approves. The recommended models come from the optional top-level `recommendedModels` in `config.json` (at most three, each with an optional `note`; see `config/example.json`); without it the guide lists the first three that `/model` shows.
+
 ## Per-thread worktrees (opt-in)
 
 A channel with `"worktrees": true` in `config.json` gives each **new** thread its own Git worktree on a `jeff/<slug>` branch (the slug is derived from the thread timestamp), created inside the project container. Those threads run concurrently — one queue per worktree instead of one per project — and their edits no longer collide in the shared checkout. Threads mapped before the channel was switched on keep the shared `/project` checkout and still take turns there; there is no migration. The OpenCode session is created with `location` pointing at the worktree, so `/stop`, `/compact`, `/model`, approvals, progress cards and uploads work unchanged.
@@ -77,7 +79,7 @@ Requires an `onboarding` section in `config.json` (see `config/example.json`): `
 
 1. Put the project folder in `projectsRoot` on the VPS (`/srv/slack-tag/projects`, owned by uid 1000; see [deployment](deploy.md)), create a Slack channel and invite OpenCode.
 2. As the owner, post `@OpenCode register` in the channel. The bot lists the subfolders that no channel uses yet; symlinks and other entries are skipped.
-3. Choose a folder. The bot updates the message as `deploy/start-project.sh` prepares the folder (`deploy/prepare-project.sh`, as uid 1000 when run as root) and starts the container; it then waits for OpenCode to answer with the safety plugin, and saves the channel. The channel works immediately; no bridge restart.
+3. Choose a folder. The bot updates the message as `deploy/start-project.sh` prepares the folder (`deploy/prepare-project.sh`, as uid 1000 when run as root) and starts the container; it then waits for OpenCode to answer with the safety plugin, and saves the channel. The channel works immediately; no bridge restart. The bot then posts the `help` guide as a new message in the channel as a welcome; if that post fails, the bridge only logs it.
 
 What gets created for a folder `app-one`:
 
