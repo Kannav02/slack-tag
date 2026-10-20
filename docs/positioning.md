@@ -54,8 +54,9 @@ The demo is the pitch: a one-minute video of three projects, three people and on
 | One shared thread per conversation, with memory, that anyone in the channel can join | Today |
 | Works on the project's real files; sends back images, logs and text files | Today |
 | Each project sealed off; keys outside the sandbox; risky steps wait for the host | Today |
-| Plain-language replies; approvals that reach the host | After GUEST-1, GUEST-2 |
+| Short, plain replies that lead with the result | After GUEST-1 |
+| People can talk in a thread; only messages to the bot reach it | After GUEST-3 |
 | Word and PDF files in and out | After DOC-1, DOC-2 |
-| Undo any change | After SNAP-1, SNAP-2 |
+| A help message with its models, commands and how it proves its work | After GUEST-5 |
 | A new project from the chat | After ONB-2 |
-| Install in one command | After HOST-1, HOST-2 |
+| Install in one command | Proposed in [hosting](hosting.md) (HOST-1, HOST-2) |

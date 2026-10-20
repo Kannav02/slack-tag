@@ -53,12 +53,12 @@ OpenCode is the first supported backend. A small common agent interface and back
 23. As the owner, I want every task that changes files to end in a pull request, so that each piece of work is isolated and reviewable.
 24. As the owner, I want the agent to post evidence such as logs, command output and screenshots to the thread, so that I can check that something works without opening a terminal.
 25. As the owner, I want routine local commands that reproduce and check a problem to run without approval, so that approvals are reserved for consequential actions.
-26. As a guest who is not technical, I want the agent to explain its work in plain language and send me finished files, so that I never need a terminal, Git or file paths.
+26. As a guest, I want short, plain replies that lead with the result, so that I can follow the work without reading through every step.
 27. As a guest, I want to upload and receive Word and PDF files, so that I can work on documents I already have.
-28. As a guest, I want to undo the agent's last change, so that trying something is never risky.
-29. As the owner, I want approval requests to reach me directly, so that a guest's work does not stall while I am elsewhere.
-30. As the owner, I want to create a new project from Slack, so that I can set up a guest's project without logging in to the server.
-31. As people sharing a thread, we want only messages addressed to the agent to reach it, so that we can talk among ourselves.
+28. As the owner, I want approval requests to reach me directly, so that a guest's work does not stall while I am elsewhere.
+29. As the owner, I want to create a new project from Slack, so that I can set up a guest's project without logging in to the server.
+30. As people sharing a thread, we want only messages addressed to the agent to reach it, so that we can talk among ourselves.
+31. As a guest, I want the bot to tell me how to use it, which models it offers, its commands and how it proves its work, so that I can start without asking the owner.
 
 ## Implementation Decisions
 
