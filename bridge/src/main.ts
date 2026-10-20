@@ -178,7 +178,8 @@ app.event("message", async ({ event, body }) => {
         .replace(/&amp;/g, "&"),
       ts: m.ts,
       ...(m.thread_ts === undefined ? {} : { threadTs: m.thread_ts }),
-      mention: text.includes(mention),
+      // Only a message that starts with the bot's mention is for the agent, so people can talk in its thread (#27).
+      mention: text.trimStart().startsWith(mention),
       files: m.files ?? [],
     })
     .catch(async (error: unknown) => {

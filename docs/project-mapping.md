@@ -13,7 +13,7 @@ flowchart LR
     SB --> FB[Shared project B files]
 ```
 
-Mention `@OpenCode` to start a conversation. Once a thread is mapped, owner replies in it continue the same session without another mention. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. To keep edits from colliding, the bridge runs one prompt at a time per working directory and queues the rest in arrival order.
+Start a message with the bot's mention to talk to it: a new message starts a conversation, and a reply in its thread continues the same session. Only messages that start with the mention reach the agent, even in a thread with one person; everything else in the thread stays between people, as does a mention later in the text. Separate sessions do not import each other's conversation history, but share their project's files and Git working tree. To keep edits from colliding, the bridge runs one prompt at a time per working directory and queues the rest in arrival order.
 
 ## Per-thread worktrees (opt-in)
 

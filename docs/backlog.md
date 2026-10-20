@@ -24,7 +24,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | GIT-1 | Open a pull request at the end of every task | High | Merged ([#48](https://github.com/Kannav02/slack-tag/pull/48)) |
 | CMD-3 | `/fix`: reproduce, fix and prove with evidence | Medium | Merged ([#55](https://github.com/Kannav02/slack-tag/pull/55)) |
 | GUEST-1 | Plain, concise replies | High | Approved; wave 1 |
-| GUEST-3 | Only messages that start with the bot mention reach the agent | High | Approved; wave 1; [#27](https://github.com/Kannav02/slack-tag/issues/27) |
+| GUEST-3 | Only messages that start with the bot mention reach the agent | High | Implemented, not deployed; [#27](https://github.com/Kannav02/slack-tag/issues/27) |
 | DOC-1 | Word and PDF files in | High | Approved; wave 1 |
 | DOC-2 | Word and PDF files out | High | Approved; wave 1 |
 | GUEST-4 | Stop button on the progress card | Medium | Approved; wave 2 |
@@ -50,7 +50,7 @@ Slack Tag is for a technical host who runs it for people who are not technical: 
 
 Per-turn snapshots and `undo` are not planned (owner, 2026-10-20); SEC-6 stays a research item. Developer-team features (worktrees, a pull request per task, `/fix`, screenshots, Git approval tuning, [#29](https://github.com/Kannav02/slack-tag/issues/29)) keep working for code projects, but get no new work unless the owner's own use needs it.
 
-Owner decisions needed before the affected item starts: whether GUEST-3's leading-mention rule also applies to a thread with only one person in it, and the product name, which sits close to Anthropic's Claude Tag.
+Owner decisions needed before the affected item starts: the product name, which sits close to Anthropic's Claude Tag. Decided 2026-10-20: GUEST-3's leading-mention rule applies to every thread, including one with a single person.
 
 ## Daily-driver direction (2026-10-17)
 
@@ -58,7 +58,7 @@ The owner wants Slack Tag to replace terminal agents for daily work shared with 
 
 ## Current behavior
 
-Any member of the bridge's workspace can talk to OpenCode in a mapped channel; several people can share one thread and its session. Each prompt reaches the agent as `<@user>: text`, and the plugin appends a note to the system prompt that the session may be multiplayer. Only the owner registers channels; the owner and a channel's `approvers` approve or reject its actions. A mention creates a session; replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Without per-thread worktrees (opt-in per channel), threads share the channel's checkout, and the bridge runs one prompt or server command at a time per project, replying "Queued: N ahead" to waiting messages. Automatic idle server shutdown is not implemented.
+Any member of the bridge's workspace can talk to OpenCode in a mapped channel; several people can share one thread and its session. Each prompt reaches the agent as `<@user>: text`, and the plugin appends a note to the system prompt that the session may be multiplayer. Only the owner registers channels; the owner and a channel's `approvers` approve or reject its actions. Only messages that start with the bot's mention reach the agent: a new one creates a session, and a reply in a mapped thread continues it. Prompts already use OpenCode `delivery: "queue"`. Without per-thread worktrees (opt-in per channel), threads share the channel's checkout, and the bridge runs one prompt or server command at a time per project, replying "Queued: N ahead" to waiting messages. Automatic idle server shutdown is not implemented.
 
 Policy version 3 allows safe command batches and routine Git operations, including normal push; force pushes are blocked. Destructive operations ask the owner. The plugin blocks `sudo` and protected edits. These controls are not a comprehensive security guarantee.
 
@@ -194,7 +194,7 @@ Later (owner, 2026-10-20); kept here for when it is picked up.
 
 ### GUEST-3: Only messages that start with the bot mention reach the agent
 
-Scope and acceptance as in [#27](https://github.com/Kannav02/slack-tag/issues/27), so people in a shared thread can talk among themselves. This reverses "replies in a mapped thread continue it without a mention"; update every document that says so. Confirm the one-person-thread decision first.
+Scope and acceptance as in [#27](https://github.com/Kannav02/slack-tag/issues/27), so people in a shared thread can talk among themselves. This reverses "replies in a mapped thread continue it without a mention"; update every document that says so. The rule applies to every thread, including one with a single person (owner, 2026-10-20).
 
 ### GUEST-4: Stop button on the progress card
 

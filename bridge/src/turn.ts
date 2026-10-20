@@ -520,8 +520,9 @@ export function createRouter(
 
   async function handle(m: Incoming) {
     const threadTs = m.threadTs ?? m.ts;
+    // Messages that do not start with the bot's mention stay between people, even in a mapped thread.
+    if (!m.mention) return;
     const thread = m.threadTs ? db.thread(m.teamId, m.channelId, m.threadTs) : undefined;
-    if (!m.mention && !thread) return;
     const say = (text: string) => slack.post(m.channelId, threadTs, text);
     // main.ts already dropped other workspaces, so any member of a mapped channel may talk to its project.
     const runtime = channels.get(m.channelId);

@@ -29,7 +29,7 @@ OPENCODE_API_KEY=<key> OPENCODE_SERVER_PASSWORD=<same password> DEMO_PROJECT=/sr
 | Post in `#demo` as the owner | Expected |
 | --- | --- |
 | `@OpenCode what is the project codename in facts.txt?` | A thread reply that grows through edits and ends with HERON and PINEAPPLE. |
-| `Write three short paragraphs about herons.` in that thread | A longer streamed reply in the same session. |
+| `@OpenCode Write three short paragraphs about herons.` in that thread | A longer streamed reply in the same session. |
 | `@OpenCode use the shell to run exactly: touch approved.txt, then reply DONE` | The command runs automatically under policy version 2; `approved.txt` appears in the side panel. |
 | Ask it to run `sudo touch /tmp/slack-tag-denied` | The hard block rejects the command; independently check that no file was created. |
 | Attach a PNG with `@OpenCode what colour is this image? One word.` | The file lands in `/tmp/slack-tag-demo/state/inbox/demo/<thread>/`, outside the project, and the model answers. |
