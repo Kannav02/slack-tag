@@ -14,8 +14,8 @@ export type Command = { name: string; args: string };
 // `init`, `review` and the safety plugin's `fix` run as OpenCode server commands; the bridge handles the rest.
 export const SERVER_COMMANDS = new Set(["init", "review", "fix"]);
 const NAMES = new Set([...SERVER_COMMANDS, "model", "stop", "compact"]);
-const NO_SESSION = "No session in this thread yet. Mention OpenCode with a request first.";
-const LOADING = "OpenCode's model list is still loading. Try `/model` again in a moment.";
+const NO_SESSION = "No session in this thread yet. Mention me with a request first.";
+const LOADING = "The model list is still loading. Try `/model` again in a moment.";
 
 const escape = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

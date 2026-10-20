@@ -74,7 +74,7 @@ await test("without the flag OpenCode auto-loads AGENTS.md, so the plugin adds n
       !system.join("\n").includes("French"),
       "AGENTS.md must not be injected when project config is on",
     );
-    assert.equal(system.length, 2); // multiplayer + screenshot only
+    assert.equal(system.length, 3); // multiplayer + concise + screenshot only
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -96,7 +96,7 @@ await test("an AGENTS.md symlinked to a server-only or outside file is not read"
         !/OUTSIDE SECRET CONTENT|PATH=|environ/.test(system.join("\n")),
         `a symlinked AGENTS.md (${target}) leaked into the prompt`,
       );
-      assert.equal(system.length, 2); // nothing injected beyond the base instructions
+      assert.equal(system.length, 3); // nothing injected beyond the base instructions
     }
   } finally {
     delete process.env[FLAG];
@@ -110,7 +110,7 @@ await test("a missing AGENTS.md injects nothing and does not error", async () =>
   process.env[FLAG] = "1";
   try {
     const system = systemFor(await contextHook(dir)); // setup must not throw
-    assert.equal(system.length, 2); // multiplayer + screenshot only
+    assert.equal(system.length, 3); // multiplayer + concise + screenshot only
   } finally {
     delete process.env[FLAG];
     await rm(dir, { recursive: true, force: true });
@@ -124,7 +124,7 @@ await test("an AGENTS.md larger than the 32 KiB cap is not injected", async () =
   try {
     const system = systemFor(await contextHook(dir));
     assert.ok(!system.join("\n").includes("xxxx"), "an over-cap AGENTS.md was injected");
-    assert.equal(system.length, 2);
+    assert.equal(system.length, 3);
   } finally {
     delete process.env[FLAG];
     await rm(dir, { recursive: true, force: true });
