@@ -23,8 +23,9 @@ const SERVER_DENY: Decision = {
   message: "Server-only path, blocked by the safety plugin",
 };
 
-// Newlines are handled as independent commands; other shell syntax requires approval.
-const COMPOUND = /[;&|<>`\r\\$(){}]/;
+// Newlines are handled as independent commands; other shell syntax requires approval. Bash splits words
+// only at spaces and tabs, so other whitespace (a vertical tab or no-break space) asks as well.
+const COMPOUND = /[;&|<>`\r\\$(){}]|[^\S \t\n]/;
 const DOWNLOAD = /\b(curl|wget)\b/;
 const RUNS_DOWNLOAD =
   /\|\s*(sudo\s+)?(\S*\/)?(ba|z|da|k)?sh\b|\|\s*(\S*\/)?(python3?|node|perl|ruby|eval|source)\b|<\(\s*(curl|wget)\b|\$\(\s*(curl|wget)\b|`\s*(curl|wget)\b/;
