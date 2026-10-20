@@ -153,7 +153,7 @@ Keep checks feature-oriented. Combine related acceptance scenarios in one checkl
 - Cross-thread memory, automatic channel-history ingestion, shared wikis, and cross-project knowledge retrieval.
 - Additional agent adapters beyond OpenCode.
 - A web dashboard, scheduled jobs, or a new agent/tool execution engine.
-- User-facing stop/status controls and advanced run management beyond the automatic idle shutdown and on-demand startup described above.
+- Advanced run management beyond stopping a run (`/stop` or the Stop button on its progress card) and the automatic idle shutdown and on-demand startup described above.
 - Merging the agent's pull requests automatically, and parallel runs within one thread.
 - Comprehensive support for every attachment format or every provider subscription.
 

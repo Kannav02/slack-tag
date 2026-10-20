@@ -218,6 +218,27 @@ for (const [actionId, decision] of [
   });
 }
 
+// Anyone in the channel may press Stop on a progress card; the router checks it is the run's live card.
+app.action("stop_run", async ({ ack, body, action }) => {
+  await ack();
+  const b = body as {
+    team?: { id: string };
+    user: { id: string };
+    channel?: { id: string };
+    message?: { ts: string; thread_ts?: string };
+  };
+  if (b.team?.id !== teamId) return;
+  await router
+    .stop(
+      b.user.id,
+      (action as { value: string }).value,
+      b.channel?.id ?? "",
+      b.message?.ts ?? "",
+      b.message?.thread_ts,
+    )
+    .catch((error: unknown) => console.error("stop failed:", redact(messageOf(error))));
+});
+
 app.action("register_folder", async ({ ack, body, action }) => {
   await ack();
   const b = body as {

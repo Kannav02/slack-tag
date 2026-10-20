@@ -3,6 +3,7 @@ import {
   createSession,
   decide,
   inputsOf,
+  interrupt,
   pending,
   pluginReady,
   prompt,
@@ -139,25 +140,25 @@ function blocks(summary: string, value?: string) {
   ];
 }
 
-// Button values come back from Slack, so read them as untrusted JSON.
-function buttonValue(value: string): { sessionId: string; requestId: string } | undefined {
-  let parsed: unknown;
+// While its run is active, the progress card has a Stop button naming the run's session.
+function liveBlocks(text: string, sessionId: string) {
+  const stop = {
+    type: "button",
+    action_id: "stop_run",
+    value: JSON.stringify({ sessionId }),
+    text: { type: "plain_text", text: "Stop" },
+  };
+  return [...blocks(text), { type: "actions", elements: [stop] }];
+}
+
+// Button values come back from Slack, so read them as untrusted JSON; callers check each field's type.
+function buttonValue(value: string): Record<string, unknown> {
   try {
-    parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   } catch {
-    return undefined;
+    return {};
   }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("sessionId" in parsed) ||
-    !("requestId" in parsed)
-  )
-    return undefined;
-  const { sessionId, requestId } = parsed;
-  return typeof sessionId === "string" && typeof requestId === "string"
-    ? { sessionId, requestId }
-    : undefined;
 }
 
 export function createRouter(
@@ -243,7 +244,7 @@ export function createRouter(
     run.trigger = triggers.get(run.sessionId);
     triggers.delete(run.sessionId);
     const text = cardText(run.progress, undefined, run.tick);
-    run.card = await slack.post(run.channelId, run.threadTs, text, blocks(text));
+    run.card = await slack.post(run.channelId, run.threadTs, text, liveBlocks(text, run.sessionId));
     run.cardShown = text;
     db.addReply(run.card, run.sessionId, run.channelId);
     run.cardEdit = Date.now();
@@ -282,10 +283,10 @@ export function createRouter(
     if (text === run.cardShown) return;
     run.cardShown = text;
     run.cardEdit = Date.now();
-    await slack.update(run.channelId, run.card, text, blocks(text));
+    await slack.update(run.channelId, run.card, text, liveBlocks(text, run.sessionId));
   }
 
-  // A run that used no tools needs no card, so it is deleted; otherwise it becomes a summary.
+  // A run that used no tools needs no card, so it is deleted; otherwise it becomes a summary with no Stop button.
   async function endCard(run: Run, outcome: Outcome) {
     const { progress, card, trigger } = run;
     stopSpin(run);
@@ -603,9 +604,9 @@ export function createRouter(
     const approvers = config.channels[channelId]?.approvers ?? [];
     if (userId !== config.ownerUserId && !approvers.includes(userId))
       return refuse("Only the owner or this channel's approvers can approve or reject actions.");
-    const button = buttonValue(value);
-    if (!button) return console.error("click ignored: malformed button value");
-    const { sessionId, requestId } = button;
+    const { sessionId, requestId } = buttonValue(value);
+    if (typeof sessionId !== "string" || typeof requestId !== "string")
+      return console.error("click ignored: malformed button value");
     const row = db.approval(requestId);
     // The button must sit in the thread where the bridge asked.
     if (row && (row.channel_id !== channelId || row.thread_ts !== threadTs))
@@ -631,6 +632,34 @@ export function createRouter(
       );
       if (decision === "reject")
         await sweep(client, sessionId, "Rejected together with another request");
+    });
+  }
+
+  // Anyone in the channel may press Stop, since stopping grants nothing. The click counts only from the run's
+  // live card, so a finished card, another message or channel, or a forged value stops nothing.
+  async function stop(
+    userId: string,
+    value: string,
+    channelId: string,
+    messageTs: string,
+    threadTs?: string,
+  ) {
+    const { sessionId } = buttonValue(value);
+    if (typeof sessionId !== "string") return console.error("stop ignored: malformed button value");
+    const tell = (text: string) => slack.ephemeral(channelId, userId, threadTs, text);
+    // The check and the interrupt run in order with agent events, so a run that has just ended is never
+    // mistaken for the session's next run, and the next queued prompt cannot start before the interrupt returns.
+    await serial(async () => {
+      const run = runs.get(sessionId);
+      const live = run?.card === messageTs && run.channelId === channelId;
+      const runtime = live ? channels.get(channelId) : undefined;
+      if (!runtime) return tell("This run has already finished.");
+      const stopped = await interrupt(runtime.client, sessionId).catch((error: unknown) => {
+        console.error("stop failed:", errorText(error));
+        return undefined;
+      });
+      if (stopped === undefined) return tell("The run could not be stopped. Try again.");
+      if (!stopped) return tell("This run has already finished.");
     });
   }
 
@@ -674,6 +703,7 @@ export function createRouter(
   return {
     handle,
     click,
+    stop,
     onEvent: (event: AgentEvent, client: Client) => later(() => apply(event, client)),
     expire: () =>
       serial(async () => {
