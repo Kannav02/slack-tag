@@ -9,20 +9,50 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | SEC-1 | Attachment writes cannot escape the project | High | Done (inbox outside project) |
 | SEC-2 | Destructive actions ask the owner and fail closed | High | Done (policy version 3) |
 | SEC-3 | Slack input and output hardening | High | Done (simulated Slack) |
-| SEC-4 | Bridge runs as a dedicated restricted user | High | Done in repo; VPS apply pending |
-| SEC-5 | Keep secrets out of agent reach; isolate projects | High | Done in PRs, VPS pending |
-| SEC-6 | Per-turn project snapshots | Medium | Research/design |
+| SEC-4 | Bridge runs as a dedicated restricted user | High | Done; on the VPS since 2026-10-03 (see findings) |
+| SEC-5 | Keep secrets out of agent reach; isolate projects | High | Done; on the VPS since 2026-10-03; CPU/disk limits moved to SEC-8 |
+| SEC-6 | Per-turn project snapshots | Medium | Replaced by SNAP-1 and SNAP-2 |
 | SEC-7 | Document architecture and trust boundaries | Medium | Done; keep updated |
 | CMD-1 | Support OpenCode commands in Slack | Medium | Implemented |
-| CMD-2 | Reduce unnecessary approvals for routine Git command batches and safe local work | High | In progress; PR [#38](https://github.com/Kannav02/slack-tag/pull/38) for [#37](https://github.com/Kannav02/slack-tag/issues/37), then [#40](https://github.com/Kannav02/slack-tag/issues/40) for localhost `curl` and background commands |
-| ONB-1 | Add projects through Slack | Medium | Implemented; VPS verification pending |
-| DEMO-1 | Demo features with headless browser screenshots | Medium | In progress; [#43](https://github.com/Kannav02/slack-tag/issues/43) |
-| UX-1 | Show run progress in Slack threads | Medium | Card and reactions implemented; dev Slack check pending |
-| PAR-1 | Each Slack thread works in its own Git worktree and branch | High | In progress; [#39](https://github.com/Kannav02/slack-tag/issues/39) |
-| TEAM-1 | Per-channel approvers | High | In progress; [#41](https://github.com/Kannav02/slack-tag/issues/41) |
-| OUT-1 | The agent sends files to its Slack thread | High | In progress; [#42](https://github.com/Kannav02/slack-tag/issues/42) |
-| GIT-1 | Open a pull request at the end of every task | High | In progress; [#44](https://github.com/Kannav02/slack-tag/issues/44) |
-| CMD-3 | `/fix`: reproduce, fix and prove with evidence | Medium | Planned after OUT-1 and GIT-1; [#45](https://github.com/Kannav02/slack-tag/issues/45) |
+| CMD-2 | Reduce unnecessary approvals for routine Git command batches and safe local work | High | Merged ([#38](https://github.com/Kannav02/slack-tag/pull/38), [#54](https://github.com/Kannav02/slack-tag/pull/54)); [#37](https://github.com/Kannav02/slack-tag/issues/37) open until its hidden batch is confirmed |
+| ONB-1 | Add projects through Slack | Medium | Done; live in Slack since 2026-10-04 |
+| DEMO-1 | Demo features with headless browser screenshots | Medium | Screenshots merged ([#49](https://github.com/Kannav02/slack-tag/pull/49)); recordings and PR images paused |
+| UX-1 | Show run progress in Slack threads | Medium | Done; live 2026-10-14; animation merged ([#61](https://github.com/Kannav02/slack-tag/pull/61)) |
+| PAR-1 | Each Slack thread works in its own Git worktree and branch | High | Merged, opt-in per channel ([#53](https://github.com/Kannav02/slack-tag/pull/53)) |
+| TEAM-1 | Per-channel approvers | High | Merged ([#47](https://github.com/Kannav02/slack-tag/pull/47)) |
+| OUT-1 | The agent sends files to its Slack thread | High | Merged ([#50](https://github.com/Kannav02/slack-tag/pull/50)) |
+| GIT-1 | Open a pull request at the end of every task | High | Merged ([#48](https://github.com/Kannav02/slack-tag/pull/48)) |
+| CMD-3 | `/fix`: reproduce, fix and prove with evidence | Medium | Merged ([#55](https://github.com/Kannav02/slack-tag/pull/55)) |
+| GUEST-1 | Plain-language replies for people who are not technical | High | Proposed; wave 1 |
+| GUEST-2 | Approvals guests understand, and that reach the host | High | Proposed; wave 1 |
+| DOC-1 | Word and PDF files in | High | Proposed; wave 1 |
+| DOC-2 | Word and PDF files out | High | Proposed; wave 1 |
+| SNAP-1 | Save the project's files before and after every run | High | Proposed; wave 1; design first |
+| ONB-2 | Create a new project from Slack | High | Proposed; wave 1; [#26](https://github.com/Kannav02/slack-tag/issues/26) |
+| GUEST-3 | Only messages that start with the bot mention reach the agent | High | Proposed; wave 2; [#27](https://github.com/Kannav02/slack-tag/issues/27) |
+| SNAP-2 | `undo` the last run's changes | High | Proposed; wave 2; needs SNAP-1 |
+| GUEST-4 | Stop button on the progress card | Medium | Proposed; wave 2 |
+| GUEST-5 | Welcome message and `help` | Medium | Proposed; wave 2 |
+| HOST-1 | Slack app manifest | High | Proposed; wave 3 |
+| HOST-2 | One-command install | High | Proposed; wave 3 |
+| HOST-3 | `doctor` check for a running install | Medium | Proposed; wave 3 |
+| LIFE-1 | Stop idle projects and start them on the next message | Medium | Proposed; wave 3 |
+| SEC-8 | CPU limits and disk warnings per project | Medium | Proposed; wave 3 |
+| MODEL-1 | Model providers besides OpenCode Go | Low | Proposed; later |
+| CHAT-1 | Discord, if guests will not use Slack | Low | Proposed; later; owner decision |
+
+## Hosts and guests direction (2026-10-20)
+
+Slack Tag is for a technical host who runs it for people who are not technical: family, a professor, friends. Guests just chat; the host approves risky steps and pays one bill. [Positioning](positioning.md) explains the audience and the pitch. New work follows this order; the details are under [Host and guest items](#host-and-guest-items).
+
+- Wave 1, in parallel, before the first guests: GUEST-1, GUEST-2, DOC-1, DOC-2, SNAP-1, ONB-2.
+- Wave 2: GUEST-3, GUEST-4, GUEST-5, and SNAP-2 once SNAP-1 has merged.
+- Wave 3, before a public launch: HOST-1, HOST-2, HOST-3, LIFE-1, SEC-8.
+- Later: MODEL-1, and CHAT-1 only if the first guests will not use Slack.
+
+Developer-team features (worktrees, a pull request per task, `/fix`, screenshots, Git approval tuning, [#29](https://github.com/Kannav02/slack-tag/issues/29)) keep working for code projects, but get no new work unless the owner's own use needs it.
+
+Owner decisions needed before the affected item starts: who may undo (proposed: anyone in the channel, because undo can itself be undone); whether GUEST-3's leading-mention rule also applies to a thread with only one person in it; and the product name, which sits close to Anthropic's Claude Tag.
 
 ## Daily-driver direction (2026-10-17)
 
@@ -30,7 +60,7 @@ The owner wants Slack Tag to replace terminal agents for daily work shared with 
 
 ## Current behavior
 
-Any member of the bridge's workspace can talk to OpenCode in a mapped channel; several people can share one thread and its session. Each prompt reaches the agent as `<@user>: text`, and the plugin appends a note to the system prompt that the session may be multiplayer. Registering a channel and approving or rejecting actions stay owner-only. A mention creates a session; replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Threads share the channel's checkout, and the bridge runs one prompt or server command at a time per project, replying "Queued: N ahead" to waiting messages. Worktrees and automatic idle server shutdown are not implemented.
+Any member of the bridge's workspace can talk to OpenCode in a mapped channel; several people can share one thread and its session. Each prompt reaches the agent as `<@user>: text`, and the plugin appends a note to the system prompt that the session may be multiplayer. Only the owner registers channels; the owner and a channel's `approvers` approve or reject its actions. A mention creates a session; replies in a mapped thread continue it without a mention. Prompts already use OpenCode `delivery: "queue"`. Without per-thread worktrees (opt-in per channel), threads share the channel's checkout, and the bridge runs one prompt or server command at a time per project, replying "Queued: N ahead" to waiting messages. Automatic idle server shutdown is not implemented.
 
 Policy version 3 allows safe command batches and routine Git operations, including normal push; force pushes are blocked. Destructive operations ask the owner. The plugin blocks `sudo` and protected edits. These controls are not a comprehensive security guarantee.
 
@@ -141,3 +171,109 @@ Open questions:
 - Record GIFs or short videos as well as stills.
 
 Acceptance: in a registered project, asking the agent to demo a page posts at least one screenshot of the running app in the thread, the agent's container never receives the Slack or GitHub token, and the sidecar cannot reach another project's containers.
+
+## Host and guest items
+
+Proposals from 2026-10-20; see [the direction](#hosts-and-guests-direction-2026-10-20) for the order. Each should fit one PR under about 300 changed lines; split it if not. Guests are people who are not technical, so judge wording by whether a parent or a professor would understand it.
+
+### GUEST-1: Plain-language replies
+
+**Problem:** The plugin's system instructions (`plugin/index.ts`) are written for developers, and bridge replies name OpenCode and slash commands. Guests do not know Git, terminals or file paths.
+
+**Scope:** Add one instruction to the plugin's `context` hook for every session: match the asker's technical level; with someone who does not use technical terms, avoid jargon (commits, branches, terminal, paths), describe changes in plain words, and send the changed file with `slack_attach` instead of naming a path. When someone states a lasting preference for the project, the agent records it in the project's `AGENTS.md` so every thread follows it. Bridge replies call the bot by its Slack name, not "OpenCode". Document that guest projects should leave per-thread worktrees off, because a worktree server reads `AGENTS.md` only at startup.
+
+**Acceptance:** an integration test drives the `context` hook, as `tests/agents.integration.test.ts` does, and finds the instruction; a real OpenCode 2.0.15 run shows it in the system prompt. Whether a real model follows it needs a live Slack check; report it.
+
+### GUEST-2: Approvals guests understand, and that reach the host
+
+**Problem:** `ask` in `bridge/src/turn.ts` posts "Approval needed" with the raw action and buttons into the guest's thread. The guest cannot approve and is not told who can, and the host may not be watching, so the run waits until the timeout rejects it.
+
+**Scope:** The card opens with a plain sentence naming who can approve (the owner and the channel's approvers, as mentions), with the action and resources below it for the approver. When a request is first posted, the bridge sends the owner and each approver a direct message linking to the card (`chat.getPermalink`); cards re-posted after a restart do not notify again. Buttons stay in the thread, so click validation is unchanged. A failed direct message is logged and never blocks the card. Add the `im:write` bot scope to `docs/deploy.md`.
+
+**Acceptance:** integration tests with the simulated Slack server: one direct message per approver with the link; approving in the thread still works; a failed direct message still leaves the card; a restart sends no duplicate messages. A live Slack check is still needed.
+
+### GUEST-3: Only messages that start with the bot mention reach the agent
+
+Scope and acceptance as in [#27](https://github.com/Kannav02/slack-tag/issues/27), so people in a shared thread can talk among themselves. This reverses "replies in a mapped thread continue it without a mention"; update every document that says so. Confirm the one-person-thread decision first.
+
+### GUEST-4: Stop button on the progress card
+
+**Problem:** Guests will not type `/stop`.
+
+**Scope:** While a run is active, its progress card shows a Stop button that anyone in the channel may press, since stopping is always safe. It uses the same interrupt as `/stop` (`bridge/src/commands.ts`), bypasses the queue, and disappears when the run ends. As with approval buttons, a click only counts on the card's own message. The native `/stop` slash command in [#28](https://github.com/Kannav02/slack-tag/issues/28) stays separate.
+
+**Acceptance:** integration tests: a click interrupts the run, the card shows it stopped and the queue moves on; a click on a finished run, from another thread or with a forged value changes nothing.
+
+### GUEST-5: Welcome message and `help`
+
+**Scope:** When registration succeeds (`bridge/src/onboard.ts`), the bot posts a short plain-language introduction in the channel: how to ask (mention it), that it works on this project's files and can send files back, who approves risky steps, and how to stop a run. `help` or `/help` after the mention posts the same text without creating a session or reaching the model. Mention only features that exist when this ships.
+
+**Acceptance:** integration tests through the entrypoint for the introduction and for `help`.
+
+### DOC-1: Word and PDF files in
+
+**Problem:** Uploads accept only images, video and plain-text formats (`bridge/src/attachments.ts`), so a `.docx` manuscript or a PDF paper is refused.
+
+**Scope:** Accept `.docx`, `.odt`, `.epub` and `.pdf` up to the existing 20 MB cap. They are stored in the inbox as today, and the prompt tells the agent where they are instead of passing them as model input. Add `pandoc` and `pdftotext` (`poppler-utils`) to `deploy/Dockerfile` and record the image size change. The policy allows `pandoc` without approval only with `-f`/`--from`, `-t`/`--to`, `-o`/`--output`, `-s`/`--standalone` and `--wrap`, reading under `/inbox`, the project or `/tmp` and writing to the project or `/tmp`; `pdftotext` gets the same path rules. Any other flag asks, because options such as `--filter`, `--lua-filter` and `--defaults` run programs or read other files.
+
+**Acceptance:** integration tests: each type is stored and announced, and unsupported types still get a clear refusal; policy tests for allowed and asking forms; `spike/v2/policy.sh` shows the real resources; a conversion runs in the built image.
+
+### DOC-2: Word and PDF files out
+
+**Scope:** `slack_attach` (`plugin/src/attach.ts`) also accepts `.docx`, `.odt` and `.epub` (ZIP signature `504b0304`) and `.pdf` (`%PDF-`), within its 10 MB cap, and its description tells the agent it can send documents. Binary documents cannot be redacted, like images; update the `slack_attach` row in `docs/trust-boundaries.md`.
+
+**Acceptance:** tests show valid documents are accepted, and a text file named `.pdf` or an oversized file is refused.
+
+### SNAP-1: Save the project's files before and after every run
+
+**Problem:** The project is a bind mount without backups (the SEC-6 gap). Anything the agent changes or deletes, or that is approved by mistake, is permanent. A guest's first question is "what if it ruins my book?"
+
+**Proposed design, to confirm in the PR before building:** the safety plugin keeps a private Git repository per project in the server's `/data` volume, which agent shells (uid 1001) cannot read, with the project folder as its work tree. A new plugin RPC records the files as a commit. It follows `.gitignore`, skips `.git` and files over a size cap, and stores symlinks as links. It runs Git with no system or global config, `core.hooksPath=/dev/null` and `core.fsmonitor=false`, so nothing in the project can run a program. The bridge calls the RPC before each prompt and after each run, inside the per-project queue, so it never races a run. Snapshots expire by age and total size (configurable). The bridge still never touches the project folder. Channels with per-thread worktrees are out of scope.
+
+**Acceptance:** integration tests through the RPC on a disposable project: edits and deletions are recorded and restorable; a symlink to a server-only file is stored as a link, not its contents; `.git` and oversized files are skipped; retention removes old snapshots. Real checks: the agent user cannot read the repository in the container, and the disk cost of a sample project is measured. Add rows to `docs/trust-boundaries.md`.
+
+### SNAP-2: `undo` the last run's changes
+
+**Scope:** `undo` or `/undo` after the mention restores the project's files to the snapshot taken before the most recent run that changed them, through the per-project queue. It takes a snapshot first, so a second `undo` goes further back and an undo can itself be undone. The reply lists the restored files in plain words. The project's own Git history is not rewritten; the restore appears as ordinary changes.
+
+**Acceptance:** integration tests: an edit followed by `undo` restores the content; repeated `undo` goes further back; `undo` during a run waits for it; with no snapshot the reply says so.
+
+### ONB-2: Create a new project from Slack
+
+Scope and acceptance as in [#26](https://github.com/Kannav02/slack-tag/issues/26), so the host can set up a guest's project without logging in to the server.
+
+### HOST-1: Slack app manifest
+
+**Scope:** `deploy/slack-app-manifest.yaml` with the bot user, Socket Mode, interactivity, the message events the bridge handles and every bot scope its Slack calls need, including `files:write`, `reactions:write` and `im:write`. `docs/deploy.md` creates the app from it instead of listing manual steps.
+
+**Acceptance:** a test checks the manifest's scopes against the Slack methods the bridge calls; a development app created from it connects and passes the development checks (record in findings).
+
+### HOST-2: One-command install
+
+**Problem:** Installing takes about a dozen manual steps (system user, polkit, gVisor, systemd, Compose and several env files). A new host will not do that.
+
+**Scope:** `scripts/install.sh` for a fresh Ubuntu 24.04 or Debian 12 server performs the Install section of `docs/deploy.md`: prerequisites (Node 24, Docker with Compose, and gVisor, falling back to `runc` with a clear warning), the `slack-tag` user and folders, env files filled from prompts (secrets never echoed or logged), units, polkit rule, firewall, onboarding with a projects folder, image build and start. Rerunning it upgrades without touching existing credentials. Split it into prerequisites and configuration if it exceeds 300 lines.
+
+**Acceptance:** an end-to-end run and a rerun in a disposable systemd container or VM, as SEC-4 was checked; `docs/deploy.md` points to the script and keeps the manual steps as reference.
+
+### HOST-3: `doctor` check for a running install
+
+**Scope:** a command that checks a running install and prints a fix for each problem: Slack authentication and scopes, each channel's server and policy version, the container runtime, firewall rules, inbox ownership and free disk.
+
+**Acceptance:** integration tests with a simulated failure for each check.
+
+### LIFE-1: Stop idle projects and start them on the next message
+
+Implements user stories 20 and 21 and the "Project server lifecycle" section of `SPEC.md`. Each project container may use 2 GB, so a host with several guest projects on a small server needs this. Split stopping and starting into separate PRs.
+
+### SEC-8: CPU limits and disk warnings per project
+
+Follow-up to SEC-5: one project's runaway build must not starve the others. Add CPU limits to both Compose files, and warn the owner in Slack when a project folder or its `/data` volume passes a size threshold.
+
+### MODEL-1: Model providers besides OpenCode Go
+
+`key-proxy` forwards only to OpenCode Go. Let the host configure another provider's key, such as an OpenRouter, Anthropic or OpenAI API key, with the same rule that the key never enters the project container.
+
+### CHAT-1: Discord
+
+Only if the first guests will not use Slack, and after an owner decision, since `SPEC.md` covers Slack only. First separate the Slack transport from the bridge core without changing behaviour, then add a Discord transport with threads, uploads and approval buttons.

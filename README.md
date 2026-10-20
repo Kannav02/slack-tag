@@ -1,5 +1,7 @@
 # Slack Tag
 
+A shared AI teammate for the people you make things with: you host it, they just chat. [Positioning](docs/positioning.md) explains who it is for and how it compares with Claude, Codex and Capy.
+
 A self-hosted Slack interface to OpenCode: each configured channel selects a project, and each thread has its own persistent agent conversation. Any member of the workspace can talk to it in a mapped channel. Only the owner can register channels; the owner and the users in a channel's optional `approvers` list (Slack user IDs in `config.json`) can approve or reject its actions.
 
 ## Development

@@ -16,11 +16,13 @@ Current permission policy (2026-10-02, policy version 3, replacing the 2026-09-2
 
 ## Problem Statement
 
-The owner already uses coding agents and pays for inference subscriptions, but wants to work with those agents from Slack instead of switching to a terminal. Existing hosted assistants introduce another product and bill; a custom bridge should connect Slack to the existing agent without becoming a new agent or knowledge platform.
+Direction since 2026-10-20 ([positioning](docs/positioning.md)): the owner makes things with people who are not technical, such as a parent writing a book, a professor on a research project or a sibling building a game. Chat assistants such as ChatGPT and Claude give each person a private conversation, so collaborators copy files and answers back and forth, and each needs an account. Coding agents such as Claude Code, Codex and Capy are built for programmers and software teams. The owner wants one shared agent per project that everyone can talk to in a chat app, working on the project's real files, while the owner hosts it, pays one flat bill and decides what it may do.
+
+The original problem still holds for the owner's own projects: the owner already uses coding agents and pays for inference subscriptions, but wants to work with those agents from Slack instead of switching to a terminal. Existing hosted assistants introduce another product and bill; a custom bridge should connect Slack to the existing agent without becoming a new agent or knowledge platform.
 
 ## Solution
 
-A self-hosted, single-owner bridge. A configured Slack channel selects a project folder and an isolated agent environment. Each thread starts a separate agent session; subsequent messages resume that session. The agent can use project files and instructions, with no memory imported from other threads.
+A self-hosted bridge run by one owner, the host. Guests in the host's Slack workspace talk to it; only the host and named approvers allow risky actions. A configured Slack channel selects a project folder and an isolated agent environment. Each thread starts a separate agent session; subsequent messages resume that session. The agent can use project files and instructions, with no memory imported from other threads.
 
 OpenCode is the first supported backend. A small common agent interface and backend-specific adapters separate Slack behavior from each agent's protocol. Messages and attachments go to the agent, streamed responses return to the same thread, and permission requests become approval prompts for the owner and the channel's named approvers.
 
@@ -51,6 +53,12 @@ OpenCode is the first supported backend. A small common agent interface and back
 23. As the owner, I want every task that changes files to end in a pull request, so that each piece of work is isolated and reviewable.
 24. As the owner, I want the agent to post evidence such as logs, command output and screenshots to the thread, so that I can check that something works without opening a terminal.
 25. As the owner, I want routine local commands that reproduce and check a problem to run without approval, so that approvals are reserved for consequential actions.
+26. As a guest who is not technical, I want the agent to explain its work in plain language and send me finished files, so that I never need a terminal, Git or file paths.
+27. As a guest, I want to upload and receive Word and PDF files, so that I can work on documents I already have.
+28. As a guest, I want to undo the agent's last change, so that trying something is never risky.
+29. As the owner, I want approval requests to reach me directly, so that a guest's work does not stall while I am elsewhere.
+30. As the owner, I want to create a new project from Slack, so that I can set up a guest's project without logging in to the server.
+31. As people sharing a thread, we want only messages addressed to the agent to reach it, so that we can talk among ourselves.
 
 ## Implementation Decisions
 
