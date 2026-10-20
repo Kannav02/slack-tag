@@ -3,14 +3,16 @@ import { randomUUID } from "node:crypto";
 import { posix } from "node:path";
 import { promisify } from "node:util";
 import type { Plugin } from "@opencode/plugin";
+import { BINARY } from "./rpc.ts";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const KEEP_MS = 10 * 60_000;
-const TYPES = /^(png|jpe?g|gif|webp|txt|log|md|json|csv|diff|patch)$/;
-const IMAGE = /^(png|jpe?g|gif|webp)$/;
-// An image must start with its format's signature, compared as hex; text must hold no NUL byte.
+const TYPES = /^(png|jpe?g|gif|webp|docx|odt|epub|pdf|txt|log|md|json|csv|diff|patch)$/;
+// A BINARY file (image or document) must start with its format's signature, compared as hex, because
+// the bridge posts it unredacted: Word, ODT and EPUB files are ZIP archives, and a PDF starts with %PDF-.
+// Text must hold no NUL byte.
 const SIGNATURE =
-  /^(png:89504e470d0a1a0a|jpe?g:ffd8ff|gif:474946383[79]61|webp:52494646.{8}57454250)/;
+  /^(png:89504e470d0a1a0a|jpe?g:ffd8ff|gif:474946383[79]61|webp:52494646.{8}57454250|(docx|odt|epub):504b0304|pdf:255044462d)/;
 // The real path ($1) must equal the requested one, so no symlink is on the way, and only a regular
 // file is read, up to $2 bytes. The server cannot signal the agent's user, so the reader times out.
 const READ = `[ "$(realpath -e -- "$1")" = "$1" ] && [ -f "$1" ] && exec timeout 10 head -c "$2" -- "$1"`;
@@ -46,7 +48,9 @@ export function take({ sessionID, id }: { sessionID: string; id: string }) {
 async function accept(shell: string, roots: string[], path: string) {
   const ext = posix.extname(path).slice(1).toLowerCase();
   if (!TYPES.test(ext))
-    throw new Error("Refused: only png, jpg, gif, webp, txt, log, md, json, csv, diff and patch.");
+    throw new Error(
+      "Refused: only png, jpg, gif, webp, docx, odt, epub, pdf, txt, log, md, json, csv, diff and patch.",
+    );
   if (!roots.some((root) => path.startsWith(`${root}/`)))
     throw new Error(`Refused: only files in ${roots.join(", ")} can be attached.`);
   const stdout = await readAsAgent(shell, path, MAX_BYTES).catch(() => {
@@ -55,7 +59,7 @@ async function accept(shell: string, roots: string[], path: string) {
   if (!stdout.length || stdout.length > MAX_BYTES)
     throw new Error("Refused: the file is empty or larger than 10 MB.");
   const hex = stdout.subarray(0, 12).toString("hex");
-  if (IMAGE.test(ext) ? !SIGNATURE.test(`${ext}:${hex}`) : stdout.includes(0))
+  if (BINARY.test(path) ? !SIGNATURE.test(`${ext}:${hex}`) : stdout.includes(0))
     throw new Error(`Refused: the content is not ${ext}.`);
   return stdout;
 }
@@ -69,8 +73,9 @@ export async function attach(ctx: Plugin.Context, shell: string) {
     tools.add({
       name: "slack_attach",
       description:
-        "Post a file to this Slack thread so people can see it, such as a screenshot, log or test output: " +
-        "png, jpg, gif, webp, txt, log, md, json, csv, diff or patch, up to 10 MB, in the project or /tmp.",
+        "Post a file to this Slack thread so people can see it, such as a screenshot, log or test output, " +
+        "or a Word, ODT, EPUB or PDF document: png, jpg, gif, webp, docx, odt, epub, pdf, txt, log, md, " +
+        "json, csv, diff or patch, up to 10 MB, in the project or /tmp.",
       options: { codemode: false },
       input: {
         type: "object",

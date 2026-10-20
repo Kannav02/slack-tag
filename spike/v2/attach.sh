@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Real check of slack_attach: OpenCode 2.0.15 with the safety plugin loaded and the scripted model.
-# Usage: ./attach.sh [check script, default attach-check.mjs; fix-check.mjs checks /fix]
+# Usage: ./attach.sh [check script, default attach-check.mjs (its document cases need pandoc); fix-check.mjs checks /fix]
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 work="$(mktemp -d)"

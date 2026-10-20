@@ -26,7 +26,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | GUEST-1 | Plain, concise replies | High | Approved; wave 1 |
 | GUEST-3 | Only messages that start with the bot mention reach the agent | High | Approved; wave 1; [#27](https://github.com/Kannav02/slack-tag/issues/27) |
 | DOC-1 | Word and PDF files in | High | Approved; wave 1 |
-| DOC-2 | Word and PDF files out | High | Approved; wave 1 |
+| DOC-2 | Word and PDF files out | High | Implemented; not deployed |
 | GUEST-4 | Stop button on the progress card | Medium | Approved; wave 2 |
 | GUEST-5 | Welcome message and `help`: models, commands and proof | Medium | Approved; wave 2 |
 | ONB-2 | Create a new project from Slack | High | Proposed; wave 2; [#26](https://github.com/Kannav02/slack-tag/issues/26) |

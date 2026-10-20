@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path";
 import bolt from "@slack/bolt";
+import { BINARY } from "../../plugin/src/rpc.ts";
 import { connect, pluginReady, subscribe } from "./agent.ts";
 import type { SlackFile } from "./attachments.ts";
 import { loadConfig, passwordOf } from "./config.ts";
@@ -115,15 +116,15 @@ const slack: SlackApi = {
     });
   },
   download,
-  // Slack's external upload flow. Text files get the same redaction as posts; images cannot be redacted.
+  // Slack's external upload flow. Text files get the same redaction as posts. Images and documents
+  // cannot be redacted, and decoding them as text would corrupt them, so their bytes go unchanged.
   async upload(channel_id, thread_ts, { name, data, caption }) {
     const filename = name.replace(/[^\w.-]/g, "_");
-    const image = /\.(png|jpe?g|gif|webp)$/i.test(filename);
     await app.client.files.uploadV2({
       channel_id,
       thread_ts,
       filename,
-      file: image ? data : Buffer.from(redact(data.toString("utf8"))),
+      file: BINARY.test(filename) ? data : Buffer.from(redact(data.toString("utf8"))),
       ...(caption ? { initial_comment: clean(caption) } : {}),
     });
   },

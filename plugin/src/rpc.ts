@@ -1,6 +1,10 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { PLUGIN_VERSION, POLICY_VERSION } from "./policy.ts";
 
+// Attachments slack_attach accepts only with their format's signature: images and Word, ODT, EPUB and
+// PDF documents. They cannot be redacted, so the bridge uploads them unchanged and redacts the rest.
+export const BINARY = /\.(png|jpe?g|gif|webp|docx|odt|epub|pdf)$/i;
+
 export const definition = Rpc.define({
   id: "slack-tag",
   methods: {
