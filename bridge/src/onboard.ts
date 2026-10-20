@@ -19,6 +19,11 @@ import type { Runtime, SlackApi } from "./turn.ts";
 const exec = promisify(execFile);
 const deploy = fileURLToPath(new URL("../../deploy/", import.meta.url));
 const FOLDER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// A new project's name is also its folder, Compose project and systemd unit instance, so it follows the
+// rule deploy/start-project.sh and deploy/50-slack-tag.rules enforce.
+const NEW_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+const NOT_CONFIGURED =
+  "This channel is not mapped to a project, and project registration is not configured.";
 const READY_MS = 120_000;
 // Ports above 1024 that fetch refuses to connect to ("bad port"), so the bridge could never reach a server there.
 const FETCH_BLOCKED = new Set([
@@ -72,20 +77,16 @@ export function createOnboarding(
 
   async function offer(channelId: string, threadTs: string) {
     const onboarding = config.onboarding;
-    if (!onboarding)
-      return void (await slack.post(
-        channelId,
-        threadTs,
-        "This channel is not mapped to a project, and project registration is not configured.",
-      ));
+    if (!onboarding) return void (await slack.post(channelId, threadTs, NOT_CONFIGURED));
     const names = await folders(await realpath(onboarding.projectsRoot));
+    const empty = "To start an empty project, mention me with `register new <name>`.";
     if (!names.length)
       return void (await slack.post(
         channelId,
         threadTs,
-        `There are no unregistered folders in \`${onboarding.projectsRoot}\`.`,
+        `There are no unregistered folders in \`${onboarding.projectsRoot}\`. ${empty}`,
       ));
-    const text = `Choose the folder in \`${onboarding.projectsRoot}\` to connect to this channel.`;
+    const text = `Choose the folder in \`${onboarding.projectsRoot}\` to connect to this channel. ${empty}`;
     const select = {
       type: "static_select",
       action_id: "register_folder",
@@ -100,8 +101,9 @@ export function createOnboarding(
     ]);
   }
 
-  // Each step is safe to repeat, so choosing the folder again after a failure resumes the setup.
-  async function register(channelId: string, messageTs: string, folder: string) {
+  // Each step is safe to repeat, so choosing the folder again after a failure resumes the setup. With
+  // create, the folder may not exist yet: the root helper makes it (see `create`).
+  async function register(channelId: string, messageTs: string, folder: string, create = false) {
     const lines: string[] = [];
     const show = (line: string) => {
       lines.push(line);
@@ -112,7 +114,7 @@ export function createOnboarding(
     const root = await realpath(config.onboarding!.projectsRoot);
     const projectDir = join(root, folder);
     const entry = FOLDER.test(folder) ? await lstat(projectDir).catch(() => undefined) : undefined;
-    if (!entry?.isDirectory())
+    if (!create && !entry?.isDirectory())
       return show(`\`${folder}\` is not a folder in \`${config.onboarding!.projectsRoot}\`.`);
     if (used().has(projectDir))
       return show(`\`${folder}\` is already connected to another channel.`);
@@ -120,9 +122,12 @@ export function createOnboarding(
     const name = folder.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (name.length > 40)
       return show(`\`${folder}\` is too long for a project name (40 characters at most).`);
+    // Two channels with one name would share an upload inbox.
+    if (Object.values(config.channels).some((channel) => channel.name === name))
+      return show(`Another channel is already named \`${name}\`.`);
     let step = "Starting the project";
     try {
-      await show(`Registering \`${folder}\`…`);
+      await show(`${create ? "Creating" : "Registering"} \`${folder}\`…`);
       const stored: StoredChannel = {
         name,
         projectDir,
@@ -131,7 +136,7 @@ export function createOnboarding(
         passwordFile: join(stateDir, `${name}.env`),
         model: config.onboarding!.model,
       };
-      const { port, password } = await envFor(name, projectDir);
+      const { port, password } = await envFor(name, projectDir, create);
       stored.opencodeUrl = `http://127.0.0.1:${port}`;
       const channel = prepareChannel(configPath, channelId, stored);
       // Create the inbox before Docker would create the mount point as root.
@@ -163,19 +168,22 @@ export function createOnboarding(
       await show("✅ OpenCode answered with the safety plugin");
 
       step = "Saving the channel";
+      // The folder exists now, so no later start may create it again.
+      if (create) await createDone(name);
       saveChannel(configPath, channelId, stored);
       config.channels[channelId] = channel;
       add(channelId, { channel, client, available: true }, password);
       await show("✅ Connected. Mention me in this channel to start.");
     } catch (error) {
       await show(
-        `❌ ${step} failed: ${messageOf(error)}\nMention me with \`register\` to try again.`,
+        `❌ ${step} failed: ${messageOf(error)}\nMention me with \`${create ? `register new ${folder}` : "register"}\` to try again.`,
       );
     }
   }
 
   // Reuse the port, network and password from an earlier attempt, so a retry starts the same container.
-  async function envFor(name: string, projectDir: string) {
+  // SLACK_TAG_CREATE=1 asks the root helper to create the missing folder (see deploy/start-project.sh).
+  async function envFor(name: string, projectDir: string, create: boolean) {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     const file = join(stateDir, `${name}.env`);
     const others: Record<string, string>[] = [];
@@ -189,6 +197,7 @@ export function createOnboarding(
         throw new Error(`${file} belongs to ${known.SLACK_TAG_PROJECT}`);
       // Env files written before projects had their own network get one now.
       if (!known.SLACK_TAG_NET) await appendFile(file, `SLACK_TAG_NET=${netFor(others)}\n`);
+      if (create && known.SLACK_TAG_CREATE !== "1") await appendFile(file, "SLACK_TAG_CREATE=1\n");
       return { port: Number(known.SLACK_TAG_PORT), password: known.SLACK_TAG_PASSWORD! };
     }
     const taken = new Set(
@@ -200,10 +209,43 @@ export function createOnboarding(
     const password = randomBytes(24).toString("hex");
     await writeFile(
       file,
-      `SLACK_TAG_PROJECT=${projectDir}\nSLACK_TAG_PORT=${port}\nSLACK_TAG_PASSWORD=${password}\nSLACK_TAG_NET=${netFor(others)}\n`,
+      `SLACK_TAG_PROJECT=${projectDir}\nSLACK_TAG_PORT=${port}\nSLACK_TAG_PASSWORD=${password}\nSLACK_TAG_NET=${netFor(others)}\n${create ? "SLACK_TAG_CREATE=1\n" : ""}`,
       { mode: 0o600 },
     );
     return { port, password };
+  }
+
+  async function createDone(name: string) {
+    const file = join(stateDir, `${name}.env`);
+    await writeFile(file, (await readFile(file, "utf8")).replace(/^SLACK_TAG_CREATE=1\n/gm, ""));
+  }
+
+  // `register new <name>` (the owner only; the router checks): an empty project whose folder the root
+  // helper creates. Sending it again while that creation is unfinished resumes it; any other folder
+  // already there is refused, and the helper never creates over anything.
+  async function create(channelId: string, threadTs: string, name: string) {
+    const onboarding = config.onboarding;
+    const reply = (text: string) => slack.post(channelId, threadTs, text);
+    if (!onboarding) return void (await reply(NOT_CONFIGURED));
+    if (!NEW_NAME.test(name))
+      return void (await reply(
+        "A project name uses 1 to 40 lowercase letters, digits, `-` or `_`, starting with a letter or digit, such as `my-book`.",
+      ));
+    const projectDir = join(await realpath(onboarding.projectsRoot), name);
+    if (used().has(projectDir))
+      return void (await reply(`\`${name}\` is already connected to another channel.`));
+    const env = join(stateDir, `${name}.env`);
+    const pending = await readFile(env, "utf8").then(parseEnv, () => undefined);
+    const resuming = pending?.SLACK_TAG_CREATE === "1" && pending.SLACK_TAG_PROJECT === projectDir;
+    if (!resuming && (await lstat(projectDir).catch(() => undefined)))
+      return void (await reply(
+        `\`${name}\` already exists in \`${onboarding.projectsRoot}\`. Mention me with \`register\` to connect it.`,
+      ));
+    const messageTs = await reply(`Creating \`${name}\`…`);
+    chain = chain
+      .then(() => register(channelId, messageTs, name, true))
+      .catch((error: unknown) => console.error("register failed:", messageOf(error)));
+    return chain;
   }
 
   async function choose(userId: string, channelId: string, messageTs: string, folder: string) {
@@ -216,5 +258,5 @@ export function createOnboarding(
     return chain;
   }
 
-  return { offer, choose };
+  return { offer, create, choose };
 }

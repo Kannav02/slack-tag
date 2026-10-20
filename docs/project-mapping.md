@@ -79,6 +79,8 @@ Requires an `onboarding` section in `config.json` (see `config/example.json`): `
 2. As the owner, post `@OpenCode register` in the channel. The bot lists the subfolders that no channel uses yet; symlinks and other entries are skipped.
 3. Choose a folder. The bot updates the message as `deploy/start-project.sh` prepares the folder (`deploy/prepare-project.sh`, as uid 1000 when run as root) and starts the container; it then waits for OpenCode to answer with the safety plugin, and saves the channel. The channel works immediately; no bridge restart.
 
+To start an empty project instead, the owner posts `@OpenCode register new <name>` in the new channel. The name uses 1 to 40 lowercase letters, digits, `-` or `_`, and becomes the folder name, as `<projectsRoot>/<name>`. The bot refuses a name whose folder already exists (connect it with `register`), a folder another channel uses, and a name another channel has, since two channels with one name would share an upload inbox. Otherwise the same steps run, with `SLACK_TAG_CREATE=1` in the project's env file: `deploy/start-project.sh` creates the folder as uid 1000 only if nothing is at that path, and preparation makes it an empty Git repository. Once the channel is connected the bridge removes that line, so a later start never creates the folder again. If a step fails, posting the same command again resumes it.
+
 What gets created for a folder `app-one`:
 
 | Item | Value |

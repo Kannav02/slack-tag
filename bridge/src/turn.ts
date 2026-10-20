@@ -165,7 +165,10 @@ export function createRouter(
   db: Db,
   slack: SlackApi,
   channels: Map<string, Runtime>,
-  offer: (channelId: string, threadTs: string) => Promise<void>,
+  registration: {
+    offer: (channelId: string, threadTs: string) => Promise<void>;
+    create: (channelId: string, threadTs: string, name: string) => Promise<void>;
+  },
 ) {
   const runs = new Map<string, Run>();
   const queues = new Map<string, Queue>();
@@ -533,9 +536,12 @@ export function createRouter(
           threadTs,
           "This channel is not mapped to a project. Only the owner can register one.",
         );
-      if (m.text.trim().toLowerCase() === "register") return offer(m.channelId, threadTs);
+      const text = m.text.trim();
+      if (text.toLowerCase() === "register") return registration.offer(m.channelId, threadTs);
+      const name = text.match(/^register\s+new\s+(\S+)$/i)?.[1];
+      if (name) return registration.create(m.channelId, threadTs, name);
       return say(
-        "This channel is not mapped to a project. Mention me with `register` to connect a project folder.",
+        "This channel is not mapped to a project. Mention me with `register` to connect a project folder, or `register new <name>` to start an empty one.",
       );
     }
     runtime.available ||= await pluginReady(runtime.client);

@@ -140,7 +140,7 @@ const onboarding = createOnboarding(
     console.log(`channel ${id} (${runtime.channel.name}) registered`);
   },
 );
-const router = createRouter(config, db, slack, channels, onboarding.offer);
+const router = createRouter(config, db, slack, channels, onboarding);
 const auth = await app.client.auth.test();
 const botId = auth.user_id;
 // The app could be installed elsewhere; only this workspace may drive it.
