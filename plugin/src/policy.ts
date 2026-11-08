@@ -338,6 +338,8 @@ export function decide(action: string, resources: readonly string[], path?: unkn
   }
   if (readsServer(action, resources, path)) return SERVER_DENY;
   if (READ.has(action)) return resources.some((path) => DOTENV.test(path)) ? ASK : ALLOW;
+  // A search only sends its query to the search provider; fetching a result page still asks.
+  if (action === "websearch") return ALLOW;
   return ASK;
 }
 

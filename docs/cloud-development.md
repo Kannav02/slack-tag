@@ -26,6 +26,7 @@ Record these commands in environment setup, review the results, and publish only
 | `npm run check` | Actual bridge against simulated APIs, real SQLite, application typechecking | Node/npm; localhost sockets |
 | `cd spike/v2 && npm ci && npm run spike` | Real pinned OpenCode with a scripted model, session/queue behavior | CLI download, Git, curl, bash; free ports from spike config |
 | `cd spike/v2 && ./policy.sh` | Real OpenCode permission resources for chosen shell commands, and the safety plugin's decision on each | Same as the spike, plus installed `plugin/` dependencies |
+| `cd spike/v2 && ./websearch.sh` | Real OpenCode with the deployed global config and the safety plugin: a web search runs without a permission request or OpenCode's provider form | Same as `policy.sh` |
 | `cd spike/v2 && ./agents.sh` | Real OpenCode with project config disabled: the safety plugin injects the project's `AGENTS.md` into the system prompt, with a no-plugin control proving OpenCode does not auto-load it under the flag (#57) | Same as `policy.sh` |
 | `cd spike/v2 && ./record.sh out.jsonl` | Real event stream of a scripted run with text, tools, a failed tool and an approval; source of `tests/fixtures/opencode-progress-run.jsonl` | Same as the spike |
 | `demo/run.sh` | Interactive fake Slack against real OpenCode/live model | Development inference key; see `demo/README.md` |
