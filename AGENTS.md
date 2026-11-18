@@ -13,7 +13,7 @@
 ### Always Do
 
 - Use `SPEC.md` and `docs/backlog.md` for requirements; distinguish proposals from verified behavior.
-- Keep OpenCode server/client/plugin at 2.0.15 together unless an upgrade is the task. Bridge dependencies resolve from `bridge/`, not the root.
+- Keep OpenCode server/client/plugin at 2.2.7 together unless an upgrade is the task. Bridge dependencies resolve from `bridge/`, not the root.
 - Test through public entrypoints; mock only external services. Use disposable projects/SQLite and verify outputs.
 - Distinguish simulated-service tests, real OpenCode checks, and real Slack verification.
 
