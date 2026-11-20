@@ -26,7 +26,7 @@ if [ -z "${OPENCODE_URL:-}" ]; then
   cp "$root/deploy/opencode.global.jsonc" "$work/xdg/opencode/opencode.jsonc"
   (cd "$DEMO_PROJECT" && exec env HOME="$work/home" XDG_CONFIG_HOME="$work/xdg" XDG_DATA_HOME="$work/home/share" \
     XDG_STATE_HOME="$work/home/state" XDG_CACHE_HOME="$work/home/cache" \
-    npx --yes -p @opencode/cli@2.0.15 opencode serve --hostname 127.0.0.1 --port "${OPENCODE_PORT:-4096}" > "$work/opencode.log" 2>&1) &
+    npx --yes -p @opencode/cli@2.2.7 opencode serve --hostname 127.0.0.1 --port "${OPENCODE_PORT:-4096}" > "$work/opencode.log" 2>&1) &
   pids+=($!)
   OPENCODE_URL=http://127.0.0.1:${OPENCODE_PORT:-4096}
   for _ in $(seq 100); do curl -s -o /dev/null -u "opencode:$OPENCODE_SERVER_PASSWORD" "$OPENCODE_URL/api/model" && break; sleep 0.3; done

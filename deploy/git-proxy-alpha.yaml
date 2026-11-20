@@ -1,7 +1,7 @@
 # Optional override for compose.yaml's alpha. Host credential, restricted to one repository per project.
 services:
   git-proxy:
-    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.0.15}
+    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.2.7}
     restart: unless-stopped
     user: "1000:1000"
     read_only: true
