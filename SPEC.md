@@ -97,7 +97,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 - Implement only the OpenCode adapter in V1. Future adapters translate their backend's RPC or equivalent structured protocol into this interface.
 - Streaming support alone does not establish compatibility. Sessions, attachments, authentication, and permission behavior must be verified separately. Unsupported capabilities must be explicit rather than silently bypassed.
 - The bridge uses the backend's supported login/provider configuration. It does not promise that every subscription can be reused with every agent.
-- V1 targets OpenCode v2 through `@opencode/client`, pinned with the server to 2.0.15. Required capabilities were verified in `spike/v2`; see `docs/findings.md`.
+- V1 targets OpenCode v2 through `@opencode/client`, pinned with the server to 2.2.7. Required capabilities were verified in `spike/v2`; see `docs/findings.md`.
 - Inference uses the owner's OpenCode Go subscription via OpenCode's `opencode-go` provider. Anthropic subscriptions are not used.
 - The Slack bot is addressed as `@OpenCode` and runs on the owner's VPS.
 - The bridge is Node.js and TypeScript, stores its state in SQLite, and connects to Slack with Socket Mode. The design and the slices are in `docs/plan.md`.
