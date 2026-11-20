@@ -81,6 +81,8 @@ async function harness(
     model("test", "test", ["text", "image"]),
     model("test", "text-only", ["text"]),
     model("other", "x", ["text"]),
+    model("test", "third", ["text"]),
+    model("test", "fourth", ["text"]),
   ];
   // OpenCode answers its first model lists with an empty catalog while it is still loading.
   const catalog = { emptyLists: 0 };
@@ -832,6 +834,109 @@ await test(
     assert.deepEqual(h.unexpected, []);
   },
 );
+
+await test(
+  "help explains the bot, its models and commands without a session or a prompt",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t);
+    const reply = async (thread: string, pattern: RegExp) => {
+      const matches = (m: Message) => m.thread_ts === thread && pattern.test(m.text ?? "");
+      await h.until(() => h.messages.some(matches));
+      return h.messages.findLast(matches)?.text ?? "";
+    };
+
+    h.send({ ts: "700.1", text: "<@UBOT> help" });
+    const guide = await reply("700.1", /^Hi, I'm <@UBOT>/);
+    assert.match(guide, /\*Asking:\* start a message with <@UBOT>\./);
+    // Without recommendedModels: the first three models /model lists.
+    assert.match(
+      guide,
+      /new threads use `test\/test`\. Available models include:\n• `test\/test`\n• `test\/text-only`\n• `test\/third`\nTo switch/,
+    );
+    assert.doesNotMatch(guide, /fourth|other\/x/);
+    for (const command of ["/model", "/stop", "/compact", "/init", "/review", "/fix", "help"])
+      assert.match(guide, new RegExp(`^• \`${command}[\` ]`, "m"));
+    assert.match(guide, /risky steps wait until <@UOWNER> approves them/);
+    h.send({ ts: "700.2", text: "<@UBOT> /help" });
+    h.send({ ts: "700.3", text: "<@UBOT>  HELP " });
+    assert.equal(await reply("700.2", /^Hi/), guide);
+    assert.equal(await reply("700.3", /^Hi/), guide);
+    assert.deepEqual([h.sessions.length, h.prompts.length, h.calls.length], [0, 0, 0]);
+
+    // The host's recommendations replace the list; the thread's own model and the approvers show.
+    await h.stop();
+    const path = join(h.state, "config.json");
+    const config = JSON.parse(await readFile(path, "utf8")) as { channels: Record<string, object> };
+    config.channels.CTEST = { ...config.channels.CTEST, approvers: ["UAPPROVER"] };
+    const recommendedModels = [
+      { model: "test/fourth", note: "best for hard tasks" },
+      { model: "test/text-only" },
+    ];
+    await writeFile(path, JSON.stringify({ ...config, recommendedModels }));
+    await h.start();
+    h.send({ ts: "700.4", text: "<@UBOT> /model text-only" });
+    await reply("700.4", /Model set to/);
+    h.send({ ts: "700.5", thread_ts: "700.4", text: "<@UBOT> help" });
+    const own = await reply("700.4", /^Hi/);
+    assert.match(
+      own,
+      /this thread uses `test\/text-only`\. Recommended:\n• `test\/fourth`: best for hard tasks\n• `test\/text-only`\nTo switch/,
+    );
+    assert.match(own, /wait until <@UOWNER> or <@UAPPROVER> approves them/);
+    assert.equal(h.prompts.length, 0);
+
+    // A request that only starts with "help" still reaches the model.
+    h.send({ ts: "700.6", text: "<@UBOT> help me with chapter 3" });
+    await h.until(() => h.prompts.length === 1);
+    assert.equal(h.prompts[0]?.text, "<@UOWNER>: help me with chapter 3");
+    assert.deepEqual(h.unexpected, []);
+  },
+);
+
+await test("recommendedModels that are not up to three named models stop startup", async (t) => {
+  const work = await mkdtemp(join(tmpdir(), "slack-tag-recommended-"));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const config = join(work, "state", "config.json");
+  await mkdir(join(work, "state"));
+  const channel = {
+    name: "a",
+    projectDir: join(work, "project"),
+    opencodeUrl: "http://127.0.0.1:9",
+    passwordEnv: "A_PASSWORD",
+    model: "test/test",
+  };
+  const entry = { model: "test/test", note: "fast" };
+  // Not a list, four entries, a blank model name, and a note that is not text.
+  for (const recommendedModels of [
+    entry,
+    [entry, entry, entry, entry],
+    [{ model: " " }],
+    [{ ...entry, note: 7 }],
+  ]) {
+    const settings = { ownerUserId: "UOWNER", channels: { CA: channel }, recommendedModels };
+    await writeFile(config, JSON.stringify(settings));
+    // A_PASSWORD stays unset, so even an accepted config stops before reaching Slack or OpenCode.
+    const child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", "--experimental-sqlite", join(root, "bridge/src/main.ts")],
+      {
+        cwd: root,
+        env: {
+          PATH: process.env.PATH,
+          SLACK_TAG_CONFIG: config,
+          SLACK_BOT_TOKEN: "xoxb-test",
+          SLACK_APP_TOKEN: "xapp-test",
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    const errors = text(child.stderr);
+    await once(child, "exit");
+    assert.notEqual(child.exitCode, 0);
+    assert.match(await errors, /recommendedModels must list at most 3 entries/);
+  }
+});
 
 // The event stream recorded from a real OpenCode 2.0.15 run (spike/v2/record.sh): a note, three tool steps
 // (one failed, one behind an approval), and a final answer, with paths rewritten to /project.

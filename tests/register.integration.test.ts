@@ -126,6 +126,9 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
     const call = slackCall.parse(args);
     const ts = call.ts ?? `200.${++sequence}`;
     messages.push({ method: path.split("/").at(-1), ...call, ts });
+    // Slack refuses the new channel's welcome; the registration must still complete.
+    if (path === "/api/chat.postMessage" && call.channel === "CNEW" && !call.thread_ts)
+      return json({ ok: false, error: "not_in_channel" });
     json({ ok: true, ts, channel: call.channel });
   }
   const handler = (req: IncomingMessage, res: ServerResponse) => {
@@ -281,6 +284,7 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
     JSON.stringify({
       ownerUserId: "UOWNER",
       onboarding: { projectsRoot: code, model: "test/test", firstPort: port },
+      recommendedModels: [{ model: "test/test", note: "the default" }],
       channels: {
         CTAKEN: {
           name: "taken",
@@ -333,6 +337,16 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   await new Promise<void>((resolve) => opencode.listen(port, "127.0.0.1", () => resolve()));
   await until(() => status().includes("Connected"));
   assert.equal(await readFile(envFile, "utf8"), firstEnv);
+  // The help guide goes to the channel as a new top-level message; Slack refusing it is only logged.
+  const welcome = () =>
+    messages.find((m) => m.method === "chat.postMessage" && m.channel === "CNEW" && !m.thread_ts);
+  await until(
+    () => welcome() && logs.includes("welcome failed: An API error occurred: not_in_channel"),
+  );
+  assert.match(
+    welcome()?.text ?? "",
+    /^Hi, I'm <@UBOT>[^]*new threads use `test\/test`\. Recommended:\n• `test\/test`: the default\n/,
+  );
 
   const calls = await dockerCalls();
   assert.equal(calls.length, 2);

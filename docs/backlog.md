@@ -28,7 +28,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | DOC-1 | Word and PDF files in | High | Approved; wave 1 |
 | DOC-2 | Word and PDF files out | High | Approved; wave 1 |
 | GUEST-4 | Stop button on the progress card | Medium | Approved; wave 2 |
-| GUEST-5 | Welcome message and `help`: models, commands and proof | Medium | Approved; wave 2 |
+| GUEST-5 | Welcome message and `help`: models, commands and proof | Medium | Implemented, not deployed |
 | ONB-2 | Create a new project from Slack | High | Proposed; wave 2; [#26](https://github.com/Kannav02/slack-tag/issues/26) |
 | GUEST-2 | Approvals guests understand, and that reach the host | Medium | Later (owner, 2026-10-20) |
 | HOST-1 | Slack app manifest | High | Owner reviewing [hosting](hosting.md) |
@@ -217,6 +217,8 @@ Scope and acceptance as in [#27](https://github.com/Kannav02/slack-tag/issues/27
 Describe only what this project has when the text is posted; the plugin's status RPC can report whether the Git proxy is set up.
 
 **Acceptance:** integration tests through the entrypoint: registration posts the introduction; `help` replies without creating a session; every command the bridge accepts appears in the help; the model lines follow the host's list, or the fallback without one.
+
+**Implemented, not deployed:** the guide is built in `bridge/src/commands.ts` from the bridge's command table, and `bridge/src/main.ts` posts it after registration; the host's list is `recommendedModels` in `config.json`. It describes the leading mention (GUEST-3), Word and PDF files (DOC-2) and the Stop button (GUEST-4) as product behaviour, so it merges after them. The pull request line says "when the project is connected to GitHub" instead of asking the plugin. Verified with simulated Slack and OpenCode only; how Slack renders the guide is not checked.
 
 ### DOC-1: Word and PDF files in
 

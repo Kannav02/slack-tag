@@ -33,16 +33,27 @@ export type Onboarding = {
   firstPort?: number;
   start?: "script" | "systemd";
 };
+// Models the host suggests in `help` and the welcome, each with an optional short note.
+export type Recommended = { model: string; note?: string };
 export type Config = {
   ownerUserId: string;
   approvalTimeoutMinutes: number;
   channels: Record<string, Channel>;
   onboarding?: Onboarding;
+  recommendedModels?: Recommended[];
 };
 
 const within = (parent: string, child: string) => !relative(parent, child).startsWith("..");
 // Slack user IDs start with U, or W for Enterprise Grid users.
 const isUserId = (user: unknown) => typeof user === "string" && /^[UW][A-Z0-9]+$/.test(user);
+// recommendedModels: at most three entries, each naming a model, with an optional note.
+const isRecommendedList = (list: unknown) =>
+  Array.isArray(list) &&
+  list.length <= 3 &&
+  list.every((entry: unknown) => {
+    const { model, note } = (entry ?? {}) as { model?: unknown; note?: unknown };
+    return typeof model === "string" && model.trim() !== "" && typeof (note ?? "") === "string";
+  });
 
 export function loadConfig(path: string): Config {
   const config = JSON.parse(readFileSync(path, "utf8")) as Omit<Config, "channels"> & {
@@ -54,6 +65,10 @@ export function loadConfig(path: string): Config {
     throw new Error("onboarding needs projectsRoot and model");
   if (config.onboarding?.start && !["script", "systemd"].includes(config.onboarding.start))
     throw new Error('onboarding.start must be "script" or "systemd"');
+  if (config.recommendedModels !== undefined && !isRecommendedList(config.recommendedModels))
+    throw new Error(
+      'recommendedModels must list at most 3 entries such as { "model": "opencode-go/kimi-k2.7-code", "note": "best for hard tasks" }',
+    );
   const channels: Record<string, Channel> = {};
   for (const [id, channel] of Object.entries(config.channels))
     channels[id] = prepareChannel(path, id, channel);

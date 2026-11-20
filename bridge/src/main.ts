@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import bolt from "@slack/bolt";
 import { connect, pluginReady, subscribe } from "./agent.ts";
 import type { SlackFile } from "./attachments.ts";
+import { guide } from "./commands.ts";
 import { loadConfig, passwordOf } from "./config.ts";
 import { openDb } from "./db.ts";
 import { createOnboarding } from "./onboard.ts";
@@ -84,7 +85,7 @@ const slack: SlackApi = {
   async post(channel, thread_ts, text, blocks) {
     const posted = await app.client.chat.postMessage({
       channel,
-      thread_ts,
+      ...(thread_ts === undefined ? {} : { thread_ts }),
       text: clean(text),
       blocks: cleanBlocks(blocks) as never,
     });
@@ -138,14 +139,18 @@ const onboarding = createOnboarding(
     channels.set(id, runtime);
     subscribe(runtime.client, (event) => router.onEvent(event, runtime.client));
     console.log(`channel ${id} (${runtime.channel.name}) registered`);
+    // The channel's members get the help guide as a welcome; a failed post never undoes the registration.
+    guide(runtime.client, config, runtime.channel, mention)
+      .then((text) => slack.post(id, undefined, text))
+      .catch((error: unknown) => console.error("welcome failed:", redact(messageOf(error))));
   },
 );
-const router = createRouter(config, db, slack, channels, onboarding.offer);
 const auth = await app.client.auth.test();
 const botId = auth.user_id;
 // The app could be installed elsewhere; only this workspace may drive it.
 const teamId = auth.team_id;
 const mention = `<@${botId}>`;
+const router = createRouter(config, db, slack, channels, onboarding.offer, mention);
 
 for (const { client } of channels.values())
   subscribe(client, (event) => router.onEvent(event, client));

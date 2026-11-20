@@ -13,7 +13,7 @@ import {
   type Permission,
 } from "./agent.ts";
 import { refusal, store, type SlackFile } from "./attachments.ts";
-import { commandOf, control, SERVER_COMMANDS } from "./commands.ts";
+import { commandOf, control, guide, SERVER_COMMANDS } from "./commands.ts";
 import type { Channel, Config } from "./config.ts";
 import type { Approval, Db } from "./db.ts";
 import { createFixLog } from "./fixlog.ts";
@@ -40,7 +40,13 @@ const slugOf = (threadTs: string) => threadTs.replace(/[^A-Za-z0-9]+/g, "-");
 const queueKey = (projectDir: string, directory: string) => `${projectDir}\0${directory}`;
 
 export type SlackApi = {
-  post: (channel: string, threadTs: string, text: string, blocks?: object[]) => Promise<string>;
+  // Without a thread, the message is a new one in the channel.
+  post: (
+    channel: string,
+    threadTs: string | undefined,
+    text: string,
+    blocks?: object[],
+  ) => Promise<string>;
   update: (channel: string, ts: string, text: string, blocks?: object[]) => Promise<void>;
   remove: (channel: string, ts: string) => Promise<void>;
   react: (channel: string, ts: string, name: string, on: boolean) => Promise<void>;
@@ -166,6 +172,8 @@ export function createRouter(
   slack: SlackApi,
   channels: Map<string, Runtime>,
   offer: (channelId: string, threadTs: string) => Promise<void>,
+  // The bot's own mention, <@U…>, for the help guide.
+  bot: string,
 ) {
   const runs = new Map<string, Run>();
   const queues = new Map<string, Queue>();
@@ -561,6 +569,8 @@ export function createRouter(
       return id;
     };
     const cmd = commandOf(m.text);
+    if (cmd?.name === "help")
+      return say(await guide(client, config, channel, bot, thread?.session_id));
     if (cmd && !SERVER_COMMANDS.has(cmd.name))
       return say(await control(client, channel, cmd, thread?.session_id, start));
 
