@@ -1,6 +1,6 @@
 # Local demo
 
-Runs the real bridge (`bridge/src/main.ts`, Bolt in Socket Mode) against `fake-slack.mjs`, a local stand-in for Slack, and OpenCode 2.0.15 with the safety plugin. The fake serves the Web API methods the bridge calls, a Socket Mode websocket, and a browser page with two channels, a user switcher, threads, uploads, and approval buttons. The bridge reaches it through `SLACK_API_URL`; without that variable it talks to slack.com.
+Runs the real bridge (`bridge/src/main.ts`, Bolt in Socket Mode) against `fake-slack.mjs`, a local stand-in for Slack, and OpenCode 2.2.7 with the safety plugin. The fake serves the Web API methods the bridge calls, a Socket Mode websocket, and a browser page with two channels, a user switcher, threads, uploads, and approval buttons. The bridge reaches it through `SLACK_API_URL`; without that variable it talks to slack.com.
 
 ## Host OpenCode
 
@@ -39,4 +39,4 @@ The fake Slack page approximates rendering. Verify Markdown visually in a develo
 
 ## Queue check
 
-`node demo/queue-check.mjs` starts real OpenCode 2.0.15 with the safety plugin, the scripted model from `spike/v2`, this fake Slack and the bridge, without an API key. Thread A runs a slow shell command and thread B a fast one sent right after. It passes when B gets a "Queued" reply and `notes.txt` ends up `A` then `B`. Set `KEEP_OPEN=1` to keep everything running at http://127.0.0.1:3000 afterwards.
+`node demo/queue-check.mjs` starts real OpenCode 2.2.7 with the safety plugin, the scripted model from `spike/v2`, this fake Slack and the bridge, without an API key. Thread A runs a slow shell command and thread B a fast one sent right after. It passes when B gets a "Queued" reply and `notes.txt` ends up `A` then `B`. Set `KEEP_OPEN=1` to keep everything running at http://127.0.0.1:3000 afterwards.
