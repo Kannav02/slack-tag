@@ -6,7 +6,7 @@
     "start": "node --experimental-strip-types --experimental-sqlite src/main.ts"
   },
   "dependencies": {
-    "@opencode/client": "2.0.15",
+    "@opencode/client": "2.2.7",
     "@slack/bolt": "4.4.0"
   }
 }
