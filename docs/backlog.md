@@ -23,7 +23,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | OUT-1 | The agent sends files to its Slack thread | High | Merged ([#50](https://github.com/Kannav02/slack-tag/pull/50)) |
 | GIT-1 | Open a pull request at the end of every task | High | Merged ([#48](https://github.com/Kannav02/slack-tag/pull/48)) |
 | CMD-3 | `/fix`: reproduce, fix and prove with evidence | Medium | Merged ([#55](https://github.com/Kannav02/slack-tag/pull/55)) |
-| GUEST-1 | Plain, concise replies | High | Approved; wave 1 |
+| GUEST-1 | Plain, concise replies | High | Implemented, not deployed |
 | GUEST-3 | Only messages that start with the bot mention reach the agent | High | Approved; wave 1; [#27](https://github.com/Kannav02/slack-tag/issues/27) |
 | DOC-1 | Word and PDF files in | High | Approved; wave 1 |
 | DOC-2 | Word and PDF files out | High | Approved; wave 1 |

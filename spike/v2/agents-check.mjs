@@ -20,12 +20,13 @@ async function prompt(port) {
   rec.stop()
 }
 
-const sentinelInSystem = (logPath) =>
+const inSystem = (logPath, needle) =>
   readFileSync(logPath, "utf8")
     .trim()
     .split("\n")
     .filter(Boolean)
-    .some((line) => (JSON.parse(line).system ?? []).some((text) => text.includes(sentinel)))
+    .some((line) => (JSON.parse(line).system ?? []).some((text) => text.includes(needle)))
+const sentinelInSystem = (logPath) => inSystem(logPath, sentinel)
 
 await prompt(process.env.WITH_PORT)
 await prompt(process.env.WITHOUT_PORT)
@@ -34,4 +35,9 @@ const withHit = sentinelInSystem(process.env.WITH_LOG)
 const withoutHit = sentinelInSystem(process.env.WITHOUT_LOG)
 console.log(`${withHit ? "PASS" : "FAIL"} plugin + project config disabled: AGENTS.md reached the system prompt`)
 console.log(`${withoutHit ? "FAIL" : "PASS"} no plugin + project config disabled: OpenCode did not auto-load AGENTS.md (control)`)
-process.exit(withHit && !withoutHit ? 0 : 1)
+// The plugin's reply-style instruction (GUEST-1) comes from the same context hook.
+const concise = inSystem(process.env.WITH_LOG, "Lead with the result")
+const conciseControl = inSystem(process.env.WITHOUT_LOG, "Lead with the result")
+console.log(`${concise ? "PASS" : "FAIL"} plugin: the concise-reply instruction reached the system prompt`)
+console.log(`${conciseControl ? "FAIL" : "PASS"} no plugin: no concise-reply instruction (control)`)
+process.exit(withHit && !withoutHit && concise && !conciseControl ? 0 : 1)

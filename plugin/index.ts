@@ -14,6 +14,13 @@ const MULTIPLAYER =
   "and each message starts with its sender's Slack mention, such as <@U123>:. Keep track of who " +
   "asked for what, address people by their mention when it helps, and do not assume that one " +
   "person agrees with another's request.";
+// Several people read every reply, and some of them are not technical: lead with the result, keep it short.
+const CONCISE =
+  "Keep replies short and plain. Lead with the result or the answer, then only the details people " +
+  "need. Do not narrate each step or paste long output unless asked; post a long log or file to the " +
+  "thread with slack_attach instead. Technical terms, commands, paths and code are fine where they " +
+  "are the precise words. When someone asks you to remember a preference for this project, add it " +
+  "to the project's AGENTS.md so later threads follow it.";
 const SCREENSHOT =
   "To show a web app you started, screenshot it with `playwright screenshot [--full-page] " +
   "[--viewport-size=W,H] [--wait-for-selector=S] [--wait-for-timeout=MS] [--timeout=MS] " +
@@ -55,6 +62,7 @@ export default Plugin.define({
     // Slack threads are shared: tell the model several people may write, each message tagged by the bridge.
     await ctx.session.hook("context", (input) => {
       input.system.push({ type: "text", text: MULTIPLAYER });
+      input.system.push({ type: "text", text: CONCISE });
       input.system.push({ type: "text", text: SCREENSHOT });
       if (process.env.GIT_PROXY_URL) input.system.push({ type: "text", text: PULL_REQUESTS });
       if (agents) input.system.push({ type: "text", text: agents });

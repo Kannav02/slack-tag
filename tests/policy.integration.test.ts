@@ -421,7 +421,7 @@ await test("permission hook refuses built-in reads of the server's /proc and /da
   await rm(project, { recursive: true });
 });
 
-await test("context hook tells the model it is multiplayer, how to screenshot, and to open a PR", async () => {
+await test("context hook tells the model it is multiplayer, to reply concisely, how to screenshot, and to open a PR", async () => {
   type Context = { system: { type: string; text: string }[] };
   const hooks = new Map<string, (input: Context) => void>();
   const host = {
@@ -442,15 +442,16 @@ await test("context hook tells the model it is multiplayer, how to screenshot, a
   hooks.get("context")?.(input);
   assert.equal(input.system[0]?.text, "base prompt");
   assert.match(input.system[1]?.text ?? "", /multiplayer session/);
-  assert.match(input.system[2]?.text ?? "", /playwright screenshot .*http:\/\/localhost:PORT/);
+  assert.match(input.system[2]?.text ?? "", /Lead with the result.*AGENTS\.md/s);
+  assert.match(input.system[3]?.text ?? "", /playwright screenshot .*http:\/\/localhost:PORT/);
   assert.doesNotMatch(JSON.stringify(input.system), /open_pull_request/);
   // Projects with the Git proxy are also told to finish every task with a pull request.
   process.env.GIT_PROXY_URL = "http://git-proxy:8081";
   const proxied: Context = { system: [] };
   hooks.get("context")?.(proxied);
   delete process.env.GIT_PROXY_URL;
-  // system is [multiplayer, screenshot, pull-requests] once the proxy is set.
-  assert.match(proxied.system[2]?.text ?? "", /jeff\/<slug> branch.*open_pull_request/s);
+  // system is [multiplayer, concise, screenshot, pull-requests] once the proxy is set.
+  assert.match(proxied.system[3]?.text ?? "", /jeff\/<slug> branch.*open_pull_request/s);
 });
 
 await test("shell hook keeps existing Git config and makes plain pull fast-forward only", async () => {
