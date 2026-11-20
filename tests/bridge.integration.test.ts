@@ -348,10 +348,16 @@ async function harness(
     assert.ok(stream);
     stream.write(`data: ${JSON.stringify({ type, data })}\n\n`);
   }
-  // A click with any button value, workspace and thread, for the malformed and misdirected cases.
+  // A click with any button, value, workspace, channel and message, for the malformed and misdirected cases.
   function rawClick(
     value: string,
-    { team = "TTEST", thread = "100.3" }: { team?: string; thread?: string } = {},
+    {
+      team = "TTEST",
+      thread = "100.3",
+      action = "approve",
+      channel = "CTEST",
+      ts = "200.99",
+    }: { team?: string; thread?: string; action?: string; channel?: string; ts?: string } = {},
   ) {
     assert.ok(socket);
     socket.send(
@@ -366,10 +372,10 @@ async function harness(
           api_app_id: "ATEST",
           token: "t",
           trigger_id: "t",
-          channel: { id: "CTEST" },
-          message: { ts: "200.99", thread_ts: thread },
+          channel: { id: channel },
+          message: { ts, thread_ts: thread },
           container: { type: "message" },
-          actions: [{ type: "button", action_id: "approve", block_id: "b", value, action_ts: "1" }],
+          actions: [{ type: "button", action_id: action, block_id: "b", value, action_ts: "1" }],
         },
       }),
     );
@@ -1061,6 +1067,107 @@ await test("a failed progress update still posts and persists an approval", asyn
   });
   assert.deepEqual(h.unexpected, []);
 });
+
+await test(
+  "anyone in the channel can stop a run with the Stop button on its live progress card",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t);
+    const interrupts = () => h.calls.filter((c) => c.type === "interrupt");
+    const ephemerals = () => h.messages.filter((m) => m.method === "chat.postEphemeral");
+    const card = () =>
+      h.messages.find((m) => m.thread_ts === "700.1" && m.method === "chat.postMessage");
+    const edits = () => h.messages.filter((m) => m.ts === card()?.ts);
+
+    // A guest's run is working while another thread's prompt waits in the project's queue.
+    h.send({ ts: "700.1", user: "UGUEST" });
+    await h.until(() => h.prompts.length === 1);
+    const sessionID = h.sessions[0]?.id ?? "";
+    h.send({ ts: "700.2" });
+    await h.until(() => h.messages.some((m) => m.thread_ts === "700.2"));
+    h.emit("session.execution.started", sessionID);
+    h.emit("session.tool.input.started", sessionID, undefined, {
+      sessionID,
+      id: "c1",
+      name: "read",
+    });
+    await h.until(() => edits().some((m) => /Reading/.test(m.text ?? "")));
+    const post = card();
+    assert.ok(post);
+    const value = JSON.stringify({ sessionId: sessionID });
+    const stop = {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          action_id: "stop_run",
+          value,
+          text: { type: "plain_text", text: "Stop" },
+        },
+      ],
+    };
+    assert.deepEqual(post.blocks?.slice(1), [stop]);
+
+    // Clicks that are not on this live card stop nothing: another workspace, another channel, a message
+    // in another thread, a forged session or a malformed value.
+    const queued = h.messages.find((m) => m.thread_ts === "700.2")?.ts ?? "";
+    const misplaced = (v: string, where: { team?: string; channel?: string; thread?: string }) =>
+      h.rawClick(v, { action: "stop_run", thread: "700.1", ts: post.ts, ...where });
+    misplaced(value, { team: "TOTHER" });
+    misplaced(value, { channel: "COTHER" });
+    h.rawClick(value, { action: "stop_run", thread: "700.2", ts: queued });
+    misplaced(JSON.stringify({ sessionId: "ses_other" }), {});
+    misplaced("{oops", {});
+    await h.until(() => ephemerals().length === 3 && /stop ignored: malformed/.test(h.logs()));
+    await delay(200);
+    assert.equal(interrupts().length, 0);
+
+    // Any member may press it, not only the owner or the run's author, and it does not wait in the queue.
+    h.click("stop_run", "UOTHER", post);
+    await h.until(() => interrupts().length === 1);
+    assert.deepEqual(
+      interrupts().map((c) => c.sessionID),
+      [sessionID],
+    );
+    assert.equal(h.prompts.length, 1);
+
+    // OpenCode reports the interruption: the card ends as stopped with no button, and the queue moves on.
+    h.emit("session.execution.interrupted", sessionID);
+    await h.until(() => edits().at(-1)?.text?.startsWith("*Stopped* · 1 step"));
+    const stopped = edits().at(-1);
+    assert.ok(stopped);
+    assert.deepEqual(stopped.blocks, [
+      { type: "section", text: { type: "mrkdwn", text: stopped.text } },
+    ]);
+    // The card kept its button through every live repaint, including the spinner's.
+    const live = edits().slice(0, -1);
+    assert.ok(live.length >= 2);
+    assert.deepEqual(
+      live.map((m) => m.blocks?.slice(1)),
+      live.map(() => [stop]),
+    );
+    await h.until(() => h.prompts.length === 2);
+    assert.equal(h.prompts[1]?.sessionID, h.sessions[1]?.id);
+
+    // The finished card's button, still shown by a client that has not refreshed, stops nothing.
+    h.click("stop_run", "UOTHER", post);
+    await h.until(() => ephemerals().length === 4);
+    const finished = "This run has already finished.";
+    assert.deepEqual(
+      ephemerals()
+        .map((m) => `${m.channel} ${m.user} ${m.text}`)
+        .sort(),
+      [
+        `COTHER UOWNER ${finished}`,
+        `CTEST UOTHER ${finished}`,
+        `CTEST UOWNER ${finished}`,
+        `CTEST UOWNER ${finished}`,
+      ],
+    );
+    assert.equal(interrupts().length, 1);
+    assert.deepEqual(h.unexpected, []);
+  },
+);
 
 // Two fake OpenCode servers record which password reached them; Slack is never reached.
 await test(
