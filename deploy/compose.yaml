@@ -1,7 +1,7 @@
 # One fixed service per mapped channel. Run deploy/prepare-project.sh on each project first.
 # Project containers run under gVisor. Set SLACK_TAG_RUNTIME=runc only where gVisor cannot be installed.
 x-channel: &channel
-  image: slack-tag-opencode:2.0.15
+  image: slack-tag-opencode:2.2.7
   runtime: ${SLACK_TAG_RUNTIME:-runsc}
   restart: unless-stopped
   # start-server drops to node (uid 1000); agent-shell drops agent shells to agent (uid 1001).
@@ -21,7 +21,7 @@ x-channel: &channel
 services:
   # Adds the OpenCode Go key to model requests. Not published on the host.
   key-proxy:
-    image: slack-tag-opencode:2.0.15
+    image: slack-tag-opencode:2.2.7
     restart: unless-stopped
     user: "1000:1000"
     read_only: true
