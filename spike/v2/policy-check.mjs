@@ -56,8 +56,11 @@ const cases = [
   ["ask", "pandoc https://example.com -t plain"],
   ["ask", "pandoc ../out.docx -t plain"],
   ["ask", "pandoc out.docx -o .git/x"],
-  // Bash keeps a vertical tab inside the word, so pandoc would get one output ending in .pdf.
-  ["ask", "pandoc out.docx -o out\vx.pdf"],
+  // Bash keeps a vertical tab or no-break space inside the word, so pandoc would get one output ending in
+  // .pdf. OpenCode 2.0.15 sent the vertical tab to the plugin as one resource, which asks; 2.2.7's shell
+  // scanner refuses both before any permission is asked.
+  ["refused", "pandoc out.docx -o out\vx.pdf"],
+  ["refused", "pandoc out.docx -o out\u00a0x.pdf"],
   ["ask", "pdftotext -opw secret b.pdf -"],
 ]
 
@@ -86,7 +89,9 @@ async function run({ client, rec }, command) {
   }
   const tool = rec.events.slice(since).find((e) => sessionOf(e) === s.id && /^session\.tool\.(success|failed)$/.test(e.type))
   const output = tool?.data.content?.map((c) => c.text).join("") ?? tool?.data.error?.message ?? ""
-  const effect = asked.length ? "ask" : tool?.type === "session.tool.success" ? "allow" : /Blocked/.test(output) ? "deny" : "?"
+  // "refused": OpenCode itself would not run the command, before any permission was asked.
+  const refused = /cannot analyze command/.test(output)
+  const effect = asked.length ? "ask" : tool?.type === "session.tool.success" ? "allow" : /Blocked/.test(output) ? "deny" : refused ? "refused" : "?"
   return { asked, effect, output }
 }
 
