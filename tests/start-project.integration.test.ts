@@ -131,3 +131,66 @@ await test("start-project.sh starts only checked projects and passes Docker only
     /attacker-image|\/etc\/shadow|xoxb|SLACK_TAG_PROJECTS_ROOT|SLACK_TAG_STATE_DIR/,
   );
 });
+
+// `register new`: the helper creates <projects root>/<name> only when the env file asks, and never over anything.
+await test("start-project.sh creates a new project's folder only when asked, only under its own name", async (t) => {
+  const work = await realpath(await mkdtemp(join(tmpdir(), "slack-tag-create-")));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const state = join(work, "state");
+  const projects = join(work, "projects");
+  await mkdir(join(state, "projects"), { recursive: true });
+  for (const name of ["book", "taken", "linked"])
+    await mkdir(join(state, "inbox", name), { recursive: true });
+  await mkdir(projects);
+  // As root, the folder is created as uid 1000, which owns the projects root (docs/deploy.md).
+  const asRoot = process.getuid?.() === 0;
+  if (asRoot) {
+    await chmod(work, 0o755);
+    await chown(projects, 1000, 1000);
+  }
+  await mkdir(join(work, "bin"));
+  await writeFile(join(work, "bin", "docker"), `#!/bin/sh\necho "$*" >> "${work}/docker.log"\n`);
+  await chmod(join(work, "bin", "docker"), 0o755);
+  const dockerCalls = async () =>
+    (await readFile(join(work, "docker.log"), "utf8").catch(() => "")).split("\n").filter(Boolean);
+  const envOf = (project: string, create = true) =>
+    `SLACK_TAG_PROJECT=${project}\nSLACK_TAG_PORT=4102\nSLACK_TAG_PASSWORD=${password}\nSLACK_TAG_NET=3\n${create ? "SLACK_TAG_CREATE=1\n" : ""}`;
+  async function start(name: string, envFile?: string) {
+    if (envFile !== undefined) await writeFile(join(state, "projects", `${name}.env`), envFile);
+    const env = { PATH: `${join(work, "bin")}:${process.env.PATH}`, SLACK_TAG_STATE_DIR: state };
+    return run("sh", [script, name], { env: { ...env, SLACK_TAG_PROJECTS_ROOT: projects } }).then(
+      () => "started",
+      (error: unknown) =>
+        error instanceof Error && "stderr" in error ? String(error.stderr).trim() : "failed",
+    );
+  }
+  const book = join(projects, "book");
+
+  // Without the flag, for another name's path, or with an invalid value, nothing is created.
+  assert.match(await start("book", envOf(book, false)), /project folder is missing/);
+  assert.match(await start("book", envOf(join(projects, "other"))), /project folder is missing/);
+  assert.match(await start("book", envOf(book).replace("NET=3", "NET=0")), /invalid network/);
+  await assert.rejects(lstat(book));
+  await assert.rejects(lstat(join(projects, "other")));
+  // A file or a symlink already at the path is never replaced or followed.
+  await writeFile(join(projects, "taken"), "keep");
+  assert.match(await start("taken", envOf(join(projects, "taken"))), /project folder is missing/);
+  assert.equal(await readFile(join(projects, "taken"), "utf8"), "keep");
+  await symlink(state, join(projects, "linked"));
+  assert.match(await start("linked", envOf(join(projects, "linked"))), /project folder is missing/);
+  assert.deepEqual(await dockerCalls(), []);
+
+  // Asked for and absent: created (as uid 1000 when run as root), prepared as a Git repository, started.
+  assert.equal(await start("book", envOf(book)), "started");
+  const created = await lstat(book);
+  assert.ok(created.isDirectory());
+  if (asRoot) assert.equal(created.uid, 1000);
+  assert.equal(created.mode & 0o007, 0);
+  await lstat(join(book, ".git", "config"));
+  // Starting again while the flag is still set keeps the folder and its files.
+  await writeFile(join(book, "chapter.md"), "draft");
+  if (asRoot) await chown(join(book, "chapter.md"), 1000, 1000);
+  assert.equal(await start("book"), "started");
+  assert.equal(await readFile(join(book, "chapter.md"), "utf8"), "draft");
+  assert.equal((await dockerCalls()).length, 2);
+});

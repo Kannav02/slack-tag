@@ -80,8 +80,9 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   let sequence = 0;
   let base = "";
 
-  const projectPassword = async () =>
-    (await readFile(envFile, "utf8")).match(/SLACK_TAG_PASSWORD=(\w+)/)?.[1];
+  const passwordIn = async (file: string) =>
+    (await readFile(file, "utf8")).match(/SLACK_TAG_PASSWORD=(\w+)/)?.[1];
+  const projectPassword = () => passwordIn(envFile);
   async function respond(req: IncomingMessage, res: ServerResponse, raw: string) {
     const args: unknown = req.headers["content-type"]?.includes("json")
       ? JSON.parse(raw || "{}")
@@ -92,8 +93,10 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
       res.end(JSON.stringify(value));
     };
     if (path.startsWith("/api/") && !path.includes(".")) {
-      // The registered project's OpenCode server accepts only that project's password.
-      const password = await projectPassword().catch(() => undefined);
+      // A registered project's OpenCode server accepts only that project's password.
+      const port = Number(new URL(req.url ?? "/", `http://${req.headers.host}`).port);
+      const file = port === portOf(opencode) ? envFile : bookEnv;
+      const password = await passwordIn(file).catch(() => undefined);
       if (
         !password ||
         req.headers.authorization !==
@@ -139,6 +142,8 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   // Slack is served from the start; the project's OpenCode only once `docker compose up` succeeds.
   const server = createServer(handler);
   const opencode = createServer(handler);
+  const bookServer = createServer(handler);
+  const bookEnv = join(state, "projects", "book-one.env");
   const wss = new WebSocketServer({ server, path: "/socket" });
   wss.on("connection", (ws) => {
     socket = ws;
@@ -159,7 +164,7 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
     for (const ws of wss.clients) ws.terminate();
     for (const res of streams) res.end();
     wss.close();
-    for (const s of [server, opencode]) {
+    for (const s of [server, opencode, bookServer]) {
       s.closeAllConnections();
       if (s.listening) await new Promise<void>((resolve) => s.close(() => resolve()));
     }
@@ -225,16 +230,16 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
         ...event,
       },
     });
-  const choose = (value: string, user = "UOWNER") =>
+  const choose = (value: string, user = "UOWNER", channel = "CNEW", ts = offerTs) =>
     send("interactive", {
       type: "block_actions",
       user: { id: user },
       team: { id: "TTEST" },
-      channel: { id: "CNEW" },
+      channel: { id: channel },
       api_app_id: "ATEST",
       trigger_id: "t",
-      message: { ts: offerTs, thread_ts: "100.1" },
-      container: { type: "message", message_ts: offerTs, channel_id: "CNEW" },
+      message: { ts, thread_ts: "100.1" },
+      container: { type: "message", message_ts: ts, channel_id: channel },
       actions: [
         {
           type: "static_select",
@@ -258,9 +263,11 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   for (const dir of ["app-one", "taken", ".hidden"])
     await mkdir(join(code, dir), { recursive: true });
   await writeFile(join(code, "notes.txt"), "not a folder");
-  // As root, deploy/start-project.sh prepares the folder as uid 1000, which must be able to reach and own it.
+  // As root, deploy/start-project.sh prepares (and for `register new` creates) folders as uid 1000,
+  // which must be able to reach them and owns the projects root, as on the VPS.
   if (process.getuid?.() === 0) {
     await chmod(work, 0o755);
+    await chown(code, 1000, 1000);
     await chown(join(code, "app-one"), 1000, 1000);
   }
   await symlink(work, join(code, "link"));
@@ -372,6 +379,65 @@ await test("registering a project folder from Slack", { timeout: 30_000 }, async
   assert.ok(!(await readFile(join(state, "config.json"), "utf8")).includes(password));
   // Rewriting config.json keeps other channels' fields, such as their approvers.
   assert.partialDeepStrictEqual(saved.channels.CTAKEN, { approvers: ["UHELPER"] });
+
+  // `register new <name>` starts an empty project. A bad name, a connected or existing folder and a
+  // name another channel uses are refused before anything is created.
+  const inBook = (ts: string, text: string) =>
+    mention({ channel: "CBOOK", ts, text: `<@UBOT> register new ${text}` });
+  const said = (thread: string, pattern: RegExp) =>
+    messages.some((m) => m.thread_ts === thread && pattern.test(m.text ?? ""));
+  await mkdir(join(code, "spare"));
+  await mkdir(join(code, "Taken"));
+  for (const [ts, name, reply] of [
+    ["100.70", "Book!", /lowercase letters/],
+    ["100.71", "app-one", /already connected to another channel/],
+    ["100.72", "spare", /already exists in .* Mention me with `register` to connect it/],
+  ] as const) {
+    inBook(ts, name);
+    await until(() => said(ts, reply));
+  }
+  // Two channels with one name would share an upload inbox, so the folder `Taken` cannot join as `taken`.
+  mention({ channel: "CBOOK", ts: "100.69" });
+  await until(() => messages.some((m) => m.thread_ts === "100.69" && m.blocks?.[1]));
+  const bookOffer = messages.find((m) => m.thread_ts === "100.69" && m.blocks?.[1]);
+  assert.match(bookOffer?.text ?? "", /`register new <name>`/);
+  choose("Taken", "UOWNER", "CBOOK", bookOffer?.ts);
+  await until(() =>
+    messages
+      .filter((m) => m.ts === bookOffer?.ts)
+      .some((m) => m.text?.includes("Another channel is already named `taken`")),
+  );
+  assert.equal((await dockerCalls()).length, 2);
+
+  // A failed start keeps the created folder and the request; sending the command again resumes it.
+  const creating = (thread: string) => {
+    const first = messages.find((m) => m.thread_ts === thread && m.text?.startsWith("Creating"));
+    return first ? (messages.filter((m) => m.ts === first.ts).at(-1)?.text ?? "") : "";
+  };
+  await writeFile(join(work, "fail"), "");
+  inBook("100.73", "book-one");
+  await until(() => creating("100.73").includes("❌"));
+  assert.match(creating("100.73"), /Mention me with `register new book-one` to try again/);
+  assert.ok((await stat(join(code, "book-one"))).isDirectory());
+  const bookFirst = await readFile(bookEnv, "utf8");
+  assert.match(bookFirst, /^SLACK_TAG_CREATE=1$/m);
+  await rm(join(work, "fail"));
+  inBook("100.74", "book-one");
+  await until(async () => (await dockerCalls()).length === 4);
+  const bookPort = Number(bookFirst.match(/SLACK_TAG_PORT=(\d+)/)?.[1]);
+  await new Promise<void>((resolve) => bookServer.listen(bookPort, "127.0.0.1", () => resolve()));
+  await until(() => creating("100.74").includes("Connected"));
+  // Once connected, the request is gone so no later start can create the folder again.
+  assert.equal(await readFile(bookEnv, "utf8"), bookFirst.replace("SLACK_TAG_CREATE=1\n", ""));
+  await stat(join(code, "book-one", ".git", "config"));
+  const withBook = savedConfig.parse(
+    JSON.parse(await readFile(join(state, "config.json"), "utf8")),
+  );
+  assert.partialDeepStrictEqual(withBook.channels.CBOOK, {
+    name: "book-one",
+    projectDir: join(code, "book-one"),
+    passwordFile: bookEnv,
+  });
 
   // The new channel works without a restart, and again after one.
   mention({ ts: "100.50", text: "<@UBOT> hello" });

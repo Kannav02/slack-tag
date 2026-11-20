@@ -1,5 +1,6 @@
 #!/bin/sh
-# Starts one project registered from Slack: prepares its folder, then docker compose with deploy/project.yaml.
+# Starts one project registered from Slack: prepares its folder (first creating it for `register new`),
+# then docker compose with deploy/project.yaml.
 # On the VPS it runs as root under slack-tag-project@.service, which the bridge may start (polkit rule);
 # in development the bridge runs it directly. The bridge only names the project, and its env file is
 # bridge-written, so every value is checked here and nothing else from that file reaches Docker.
@@ -24,16 +25,28 @@ port=$(value SLACK_TAG_PORT)
 password=$(value SLACK_TAG_PASSWORD)
 net=$(value SLACK_TAG_NET)
 
-# The project must be a real folder directly inside the projects root: not a symlink, not deeper, not the root.
-real_root=$(realpath "$root")
-[ -n "$project" ] && [ -d "$project" ] && [ ! -L "$project" ] || fail "project folder is missing"
-[ "$(realpath "$project")" = "$project" ] && [ "$(dirname "$project")" = "$real_root" ] ||
-  fail "project folder is not directly inside $root"
 printf '%s' "$port" | grep -Eqx '[0-9]{4,5}' && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || fail "invalid port"
 printf '%s' "$net" | grep -Eqx '[0-9]{1,3}' && [ "$net" -ge 1 ] && [ "$net" -le 254 ] || fail "invalid network number"
 printf '%s' "$password" | grep -Eqx '[0-9a-f]{48}' || fail "invalid server password"
 inbox="$state/inbox/$name"
 [ -d "$inbox" ] && [ ! -L "$inbox" ] || fail "upload inbox $inbox is missing"
+
+real_root=$(realpath "$root")
+# A project created from Slack: once everything else checks out, make its folder as the container user,
+# only as <projects root>/<name> and only while nothing is there, so creating never replaces or adopts
+# anything (mkdir also fails if a path appears in between).
+if [ "$(value SLACK_TAG_CREATE)" = 1 ] && [ "$project" = "$real_root/$name" ] && [ ! -e "$project" ] && [ ! -L "$project" ]; then
+  if [ "$(id -u)" = 0 ]; then
+    env -i PATH="$PATH" setpriv --reuid=1000 --regid=1000 --clear-groups mkdir -m 0750 -- "$project"
+  else
+    mkdir -m 0750 -- "$project"
+  fi
+fi
+
+# The project must be a real folder directly inside the projects root: not a symlink, not deeper, not the root.
+[ -n "$project" ] && [ -d "$project" ] && [ ! -L "$project" ] || fail "project folder is missing"
+[ "$(realpath "$project")" = "$project" ] && [ "$(dirname "$project")" = "$real_root" ] ||
+  fail "project folder is not directly inside $root"
 
 # Prepare the folder with the container user's rights, not root's: the agent may have planted symlinks in it.
 if [ "$(id -u)" = 0 ]; then

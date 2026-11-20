@@ -29,7 +29,7 @@ Start a task with the handoff prompt in `docs/cloud-development.md`, naming one 
 | DOC-2 | Word and PDF files out | High | Approved; wave 1 |
 | GUEST-4 | Stop button on the progress card | Medium | Approved; wave 2 |
 | GUEST-5 | Welcome message and `help`: models, commands and proof | Medium | Approved; wave 2 |
-| ONB-2 | Create a new project from Slack | High | Proposed; wave 2; [#26](https://github.com/Kannav02/slack-tag/issues/26) |
+| ONB-2 | Create a new project from Slack | High | Implemented, not deployed; [#26](https://github.com/Kannav02/slack-tag/issues/26) |
 | GUEST-2 | Approvals guests understand, and that reach the host | Medium | Later (owner, 2026-10-20) |
 | HOST-1 | Slack app manifest | High | Owner reviewing [hosting](hosting.md) |
 | HOST-2 | One-command install | High | Owner reviewing [hosting](hosting.md) |
@@ -234,7 +234,7 @@ Describe only what this project has when the text is posted; the plugin's status
 
 ### ONB-2: Create a new project from Slack
 
-Scope and acceptance as in [#26](https://github.com/Kannav02/slack-tag/issues/26), so the host can set up a guest's project without logging in to the server. Today `register` only connects a folder that already exists in `projectsRoot` (`bridge/src/onboard.ts`), and answers "There are no unregistered folders" otherwise; creating the folder still needs a login to the server.
+Scope and acceptance as in [#26](https://github.com/Kannav02/slack-tag/issues/26), so the host can set up a guest's project without logging in to the server. `register` only connects a folder that already exists in `projectsRoot`; `register new <name>` (owner decision 2026-10-20: a text command, no pop-up) creates one through the root helper, as described in [project mapping](project-mapping.md).
 
 ### HOST-1, HOST-2, HOST-3, LIFE-1, SEC-8 and MODEL-1
 
