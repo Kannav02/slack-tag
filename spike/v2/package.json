@@ -6,7 +6,7 @@
     "spike": "./run.sh"
   },
   "dependencies": {
-    "@opencode/cli": "2.0.15",
-    "@opencode/client": "2.0.15"
+    "@opencode/cli": "2.2.7",
+    "@opencode/client": "2.2.7"
   }
 }
