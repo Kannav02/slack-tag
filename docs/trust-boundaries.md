@@ -72,7 +72,7 @@ One channel maps to one project and one server; each thread is one session on it
 | Control | Status |
 | --- | --- |
 | Workspace members' messages can start or continue sessions in mapped channels. | **Tested**, **Live** for the owner path; two-user live test pending |
-| Member replies in a mapped thread continue without a mention. | **Tested**, **Live** for the owner path |
+| Only a message that starts with the bot's mention reaches the agent; other messages in a mapped thread, including a mention later in the text, are ignored (#27). | **Tested** |
 | The bridge reads its workspace from `auth.test` and ignores events, approval clicks and folder choices from any other workspace. | **Tested** (SEC-3) |
 | Only the owner can register a project. Approval buttons accept the owner and the users in that channel's `approvers`; anyone else, including another channel's approvers, gets a private refusal and the request stays pending. | **Tested**, **Live** for the owner path |
 | Approval button values are parsed defensively and must come from the thread where the bridge asked; malformed or misplaced clicks are ignored. | **Tested** (SEC-3) |

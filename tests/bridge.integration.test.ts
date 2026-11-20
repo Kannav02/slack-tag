@@ -527,10 +527,15 @@ await test(
     assert.deepEqual(last.blocks, [{ type: "markdown", text: last.text }]);
     assert.ok(!JSON.stringify(messages).includes("synthetic-secret"));
 
-    // Another member of the mapped channel continues the same session.
-    send({ ts: "100.4", thread_ts: "100.3", user: "UOTHER", text: "continue without a mention" });
+    // People can talk in the thread: a reply without the mention, or with it later in the text, never reaches the agent (#27).
+    send({ ts: "100.31", thread_ts: "100.3", user: "UOTHER", text: "which option should we use?" });
+    send({ ts: "100.32", thread_ts: "100.3", text: "option B, thanks <@UBOT>" });
+    // Another member of the mapped channel continues the same session by starting with the mention.
+    send({ ts: "100.4", thread_ts: "100.3", user: "UOTHER", text: " <@UBOT> implement option B" });
     await until(() => prompts.length === 2);
-    assert.equal(prompts[1]?.text, "<@UOTHER>: continue without a mention");
+    await delay(200);
+    assert.equal(prompts.length, 2);
+    assert.equal(prompts[1]?.text, "<@UOTHER>: implement option B");
     assert.equal(prompts[1]?.sessionID, sessionID);
     assert.equal(prompts[1]?.delivery, "queue");
     assert.equal(sessions.length, 1);
@@ -600,7 +605,7 @@ await test(
 
     await stop();
     await start();
-    send({ ts: "100.6", thread_ts: "100.3", text: "continue after restart" });
+    send({ ts: "100.6", thread_ts: "100.3", text: "<@UBOT> continue after restart" });
     await until(() => prompts.length === 4);
     assert.equal(prompts[3]?.sessionID, sessionID);
     assert.equal(prompts[3]?.text, "<@UOWNER>: continue after restart");
@@ -692,7 +697,7 @@ await test(
       ts: "100.12",
       thread_ts: "100.3",
       subtype: "file_share",
-      text: "read this",
+      text: "<@UBOT> read this",
       files: [note],
     });
     await until(() => prompts.length === 7);
@@ -760,7 +765,7 @@ await test(
       ts: "300.6",
       thread_ts: "300.2",
       subtype: "file_share",
-      text: "look",
+      text: "<@UBOT> look",
       files: [
         {
           name: "shot.png",
@@ -1237,7 +1242,7 @@ await test(
     assert.ok(!queued("500.1") && !queued("500.2"));
 
     // A second message in thread A waits for A's running prompt: the same thread stays in order.
-    h.send({ ts: "500.3", thread_ts: "500.1", text: "second in A" });
+    h.send({ ts: "500.3", thread_ts: "500.1", text: "<@UBOT> second in A" });
     await h.until(() => queued("500.1"));
     assert.match(
       h.messages.findLast((m) => m.thread_ts === "500.1")?.text ?? "",
@@ -1251,10 +1256,10 @@ await test(
     assert.equal(h.prompts[2]?.text, "<@UOWNER>: second in A");
 
     // An old mapping keeps /project and never creates a worktree; two such threads share the /project queue.
-    h.send({ ts: "900.2", thread_ts: "900.1", text: "legacy A" });
+    h.send({ ts: "900.2", thread_ts: "900.1", text: "<@UBOT> legacy A" });
     await h.until(() => h.prompts.length === 4);
     assert.equal(h.prompts[3]?.sessionID, "ses_legacy1");
-    h.send({ ts: "901.2", thread_ts: "901.1", text: "legacy B" });
+    h.send({ ts: "901.2", thread_ts: "901.1", text: "<@UBOT> legacy B" });
     await h.until(() => queued("901.1"));
     await delay(200);
     assert.equal(h.prompts.length, 4);
@@ -1488,7 +1493,7 @@ await test("/fix runs the plugin's command and uploads the shell commands its ow
   tool(sessionID, "c7", "input.started", { name: "read" });
   h.emit("session.execution.succeeded", sessionID);
   await h.until(() => h.reactions.includes("+white_check_mark@600.2"));
-  h.send({ ts: "600.3", thread_ts: "600.1", text: "run the tests" });
+  h.send({ ts: "600.3", thread_ts: "600.1", text: "<@UBOT> run the tests" });
   await h.until(() => h.prompts.length === 1);
   h.emit("session.execution.started", sessionID);
   shell(sessionID, "c8", "npm test");
