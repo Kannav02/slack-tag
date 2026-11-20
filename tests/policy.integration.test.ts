@@ -362,6 +362,100 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("edit", null), "ask");
 });
 
+// Bash splits words only at spaces and tabs. The plugin used to split at any whitespace, so a rule that
+// checks single words (a path's folder, an output's extension) could pass a word bash runs as one.
+await test("permission hook asks when a command has whitespace bash does not split words at", async () => {
+  const evaluate = await permissionHook();
+  const shell = (command: string) => {
+    const input = { sessionID: "ses_1", action: "shell", resources: [command], effect: "allow" };
+    evaluate(input);
+    return input.effect;
+  };
+  for (const space of ["\v", "\f", "\u00a0", "\u2003", "\u3000", "\ufeff"])
+    assert.equal(shell(`cat README.md${space}notes.txt`), "ask", JSON.stringify(space));
+  assert.equal(shell("cat README.md\tnotes.txt"), "allow");
+  assert.equal(shell("cat README.md notes.txt"), "allow");
+});
+
+await test("permission hook lets pandoc and pdftotext read uploads and write the project or /tmp, and asks for the rest", async () => {
+  const evaluate = await permissionHook();
+  const shell = (...resources: string[]) => {
+    const input = { sessionID: "ses_1", action: "shell", resources, effect: "allow" };
+    evaluate(input);
+    return input.effect;
+  };
+  for (const command of [
+    "pandoc /inbox/1.2/a.docx -t plain",
+    "pandoc -s --from=docx --to=markdown+smart --wrap=none /inbox/1.2/a.docx -o /tmp/a.md",
+    "pandoc -f odt -t gfm /inbox/1.2/story.odt --output notes/story.md 2>&1",
+    "pandoc '/inbox/1.2/book.epub' --to plain",
+    "pandoc notes.md -o out.docx",
+    "pandoc /project/a.md b.md --output=/project/out.odt",
+    "pdftotext -layout /inbox/1.2/b.pdf -",
+    "pdftotext -f 1 -l 3 -nopgbrk /tmp/b.pdf /tmp/b.txt",
+    "pdftotext Paper.PDF",
+  ]) {
+    assert.equal(shell(command), "allow", command);
+  }
+  // Real OpenCode 2.0.15 sends `pandoc … | head -50` as one resource per command.
+  assert.equal(shell("pandoc /inbox/1.2/a.docx -t plain", "head -50"), "allow");
+  assert.equal(shell("pdftotext /inbox/1.2/b.pdf -", "rm -rf src"), "ask");
+  for (const command of [
+    // Options that run programs, read other files or write elsewhere.
+    "pandoc --filter x a.docx",
+    "pandoc -F x a.docx",
+    "pandoc --lua-filter x.lua a.docx",
+    "pandoc -L x.lua a.docx",
+    "pandoc --defaults d.yaml a.docx",
+    "pandoc -d d a.docx",
+    "pandoc --data-dir=/tmp/d a.docx",
+    "pandoc --resource-path=/etc a.md -o a.docx",
+    "pandoc --template=t.html -s a.md -o a.html",
+    "pandoc --extract-media=media a.docx",
+    "pandoc --pdf-engine=sh a.md -o a.html",
+    "pandoc --out=a.txt a.md",
+    "pandoc --wrap none a.md",
+    "pandoc -st plain a.md",
+    // A .lua reader or writer runs code; PDF output runs a PDF engine.
+    "pandoc -f reader.lua a.txt",
+    "pandoc -t pdf a.md",
+    "pandoc a.md -o out.pdf",
+    "pandoc a.md -o out.PDF",
+    // Bash splits words only at spaces and tabs, so each of these writes one file ending in .pdf.
+    "pandoc a.md -o out\vx.pdf",
+    "pandoc a.md -o out\u00a0x.pdf",
+    // pandoc 3 runs Lua or a web server as subcommands.
+    "pandoc lua x.lua",
+    "pandoc server",
+    // URLs, `..`, other folders and protected paths.
+    "pandoc https://example.com -t plain",
+    "pandoc file:///etc/passwd -t plain",
+    "pandoc ../a.docx -t plain",
+    "pandoc /inbox/../etc/passwd -t plain",
+    "pandoc /etc/passwd -t plain",
+    "pandoc ~/a.docx -t plain",
+    "pandoc a.md --output=../x.docx",
+    "pandoc a.md -o /project/../etc/x",
+    "pandoc a.md -o /inbox/1.2/x.docx",
+    "pandoc a.md -o opencode.json",
+    "pandoc a.md -o .git/config",
+    "pandoc a.md -o a.docx -o b.docx",
+    "pandoc -t plain",
+    "pandoc a.md -t plain > out.txt",
+    "/usr/bin/pandoc a.md",
+    "pdftotext -opw secret b.pdf -",
+    "pdftotext -f x b.pdf -",
+    "pdftotext b.txt -",
+    "pdftotext ../b.pdf -",
+    "pdftotext https://example.com/b.pdf -",
+    "pdftotext b.pdf ../out.txt",
+    "pdftotext b.pdf opencode.json",
+    "pdftotext b.pdf out.txt extra.txt",
+  ]) {
+    assert.equal(shell(command), "ask", command);
+  }
+});
+
 // Request shapes recorded from real OpenCode 2.0.15: external_directory sends "<dir>/*" before the
 // tool's own request, and glob and grep send their pattern as the resource and the folder as metadata.
 await test("permission hook refuses built-in reads of the server's /proc and /data without asking", async () => {

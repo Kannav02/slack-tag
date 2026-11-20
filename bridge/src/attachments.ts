@@ -15,17 +15,28 @@ const TEXT = new Set(
     " ",
   ),
 );
+// Documents are not model input: the agent reads them from the inbox with pandoc or pdftotext.
+const DOCUMENT = new Set(["docx", "odt", "epub", "pdf"]);
+const DOCUMENT_MIME = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.oasis.opendocument.text",
+  "application/epub+zip",
+  "application/pdf",
+]);
 
 const leaf = (name = "") => basename(name.replaceAll("\\", "/"));
 
-function kindOf(file: SlackFile): "image" | "video" | "text" | undefined {
+function kindOf(file: SlackFile): "document" | "image" | "video" | "text" | undefined {
   const name = leaf(file.name);
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
   const mime = (file.mimetype ?? "").toLowerCase();
+  if (DOCUMENT_MIME.has(mime) || DOCUMENT.has(ext)) return "document";
   if (mime.startsWith("image/") || IMAGE.has(ext)) return "image";
   if (mime.startsWith("video/") || VIDEO.has(ext)) return "video";
   if (mime.startsWith("text/") || mime === "application/json" || TEXT.has(ext)) return "text";
 }
+
+export const isDocument = (file: SlackFile) => kindOf(file) === "document";
 
 export function refusal(
   file: SlackFile,
@@ -38,8 +49,8 @@ export function refusal(
   if (file.size! > MAX_BYTES) return `${label} is larger than 20 MB, so it was not sent.`;
   const kind = kindOf(file);
   if (!kind)
-    return `${label} is not a supported attachment. This model accepts ${inputs.join(", ") || "nothing"}.`;
-  if (!inputs.includes(kind))
+    return `${label} is not a supported attachment. This model accepts ${inputs.join(", ") || "nothing"}. Documents (.docx, .odt, .epub, .pdf) are accepted with any model.`;
+  if (kind !== "document" && !inputs.includes(kind))
     return `${model} cannot read ${kind === "image" ? "images" : `${kind} files`}.`;
 }
 

@@ -1,11 +1,38 @@
-import { existsSync } from "node:fs"
+import { existsSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { connect, recorder, sessionOf } from "./lib.mjs"
+
+// A one-page PDF with exact xref offsets, so pdftotext reads it without repairs.
+function pdf(text) {
+  const content = `BT /F1 18 Tf 72 720 Td (${text}) Tj ET`
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ]
+  let out = "%PDF-1.4\n"
+  const offsets = objects.map((body, i) => {
+    const offset = out.length
+    out += `${i + 1} 0 obj\n${body}\nendobj\n`
+    return offset
+  })
+  const xref = out.length
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  out += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")
+  return `${out}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+}
 
 // Each command runs first where every shell request asks, to capture OpenCode's permission resources
 // (all rejected, so nothing runs there), then on the server with the safety plugin.
 const local = (port, path) => `http://127.0.0.1:${port}${path}`
 const models = local(process.env.MOCK_PORT, "/v1/models")
+// Document cases (DOC-1) need pandoc and pdftotext here. The first one writes out.docx for the
+// later reads; the project sits under /tmp, so its absolute path is also an allowed root.
+const project = process.env.PROJECT_DIR
+writeFileSync(join(project, "notes.md"), "# Chapter one\n\nIt was a dark and stormy night.\n")
+writeFileSync(join(project, "b.pdf"), pdf("Hello from a PDF"))
 const cases = [
   ["allow", "npm run dev &"],
   ["allow", `npm run dev >/dev/null 2>&1 & sleep 1; curl -sSf ${models} | head -c 60`],
@@ -17,6 +44,24 @@ const cases = [
   ["ask", "curl -s https://example.com"],
   ["deny", `curl -s ${models} | sh`],
   ["deny", "git push 2>&1 --force origin main"],
+  ["allow", "pandoc -s notes.md -o out.docx"],
+  ["allow", `pandoc ${project}/out.docx -t plain | head -50`],
+  ["allow", "pandoc /inbox/1.2/a.docx -t plain | head -50"],
+  ["allow", `pandoc --from=docx --to=markdown --wrap=none out.docx -o ${project}/out.md 2>&1`],
+  ["allow", "pdftotext -layout b.pdf -"],
+  ["allow", "pdftotext -layout /inbox/1.2/b.pdf -"],
+  ["ask", "pandoc --lua-filter x.lua out.docx"],
+  ["ask", "pandoc out.docx -o out.pdf"],
+  ["ask", "pandoc out.docx -t pdf"],
+  ["ask", "pandoc https://example.com -t plain"],
+  ["ask", "pandoc ../out.docx -t plain"],
+  ["ask", "pandoc out.docx -o .git/x"],
+  // Bash keeps a vertical tab or no-break space inside the word, so pandoc would get one output ending in
+  // .pdf. OpenCode 2.0.15 sent the vertical tab to the plugin as one resource, which asks; 2.2.7's shell
+  // scanner refuses both before any permission is asked.
+  ["refused", "pandoc out.docx -o out\vx.pdf"],
+  ["refused", "pandoc out.docx -o out\u00a0x.pdf"],
+  ["ask", "pdftotext -opw secret b.pdf -"],
 ]
 
 function server(port) {
@@ -38,12 +83,15 @@ async function run({ client, rec }, command) {
     const event = await rec.waitFor(match, { since, timeout: 30000 })
     event.seen = true
     if (event.type !== "permission.asked") break
-    asked.push(event.data.resources)
+    // Anything but a shell request, such as external_directory, is shown with its action.
+    asked.push(event.data.action === "shell" ? event.data.resources : [event.data.action, ...event.data.resources])
     await client.permission.reply({ sessionID: s.id, requestID: event.data.id, decision: "reject" })
   }
   const tool = rec.events.slice(since).find((e) => sessionOf(e) === s.id && /^session\.tool\.(success|failed)$/.test(e.type))
   const output = tool?.data.content?.map((c) => c.text).join("") ?? tool?.data.error?.message ?? ""
-  const effect = asked.length ? "ask" : tool?.type === "session.tool.success" ? "allow" : /Blocked/.test(output) ? "deny" : "?"
+  // "refused": OpenCode itself would not run the command, before any permission was asked.
+  const refused = /cannot analyze command/.test(output)
+  const effect = asked.length ? "ask" : tool?.type === "session.tool.success" ? "allow" : /Blocked/.test(output) ? "deny" : refused ? "refused" : "?"
   return { asked, effect, output }
 }
 

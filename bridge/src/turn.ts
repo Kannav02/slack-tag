@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import {
   command,
   createSession,
@@ -12,7 +13,7 @@ import {
   type Client,
   type Permission,
 } from "./agent.ts";
-import { refusal, store, type SlackFile } from "./attachments.ts";
+import { isDocument, refusal, store, type SlackFile } from "./attachments.ts";
 import { commandOf, control, SERVER_COMMANDS } from "./commands.ts";
 import type { Channel, Config } from "./config.ts";
 import type { Approval, Db } from "./db.ts";
@@ -573,12 +574,21 @@ export function createRouter(
     const refused = m.files.map((file) => refusal(file, inputs, model)).filter(Boolean);
     if (refused.length) return say(refused.join("\n"));
     const files = [];
-    for (const file of m.files) files.push(await store(channel, threadTs, file, slack.download));
+    const documents = [];
+    for (const file of m.files) {
+      const stored = await store(channel, threadTs, file, slack.download);
+      // Documents stay out of the model input; the prompt names their path on the server instead.
+      if (isDocument(file)) documents.push(fileURLToPath(stored.uri));
+      else files.push(stored);
+    }
 
     const sessionId = thread?.session_id ?? (await start(channel.model));
     const directory = thread?.directory ?? startedDir ?? channel.serverDir;
     // Several people can share a thread, so the agent sees who sent each prompt. Command arguments stay as typed.
-    const text = cmd ? cmd.args : `<@${m.userId}>: ${m.text.trim() || "sent the attached files."}`;
+    const typed = cmd ? cmd.args : `<@${m.userId}>: ${m.text.trim() || "sent the attached files."}`;
+    const text = documents.length
+      ? `${typed}\nAttached documents (read them with pandoc or pdftotext): ${documents.join(", ")}`.trim()
+      : typed;
     await enqueue(queueKey(channel.projectDir, directory), {
       client,
       sessionId,
