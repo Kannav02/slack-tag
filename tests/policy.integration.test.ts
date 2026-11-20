@@ -362,6 +362,21 @@ await test("permission hook allows safe work, asks for the rest, and denies forc
   assert.equal(effect("edit", null), "ask");
 });
 
+// Bash splits words only at spaces and tabs. The plugin used to split at any whitespace, so a rule that
+// checks single words (a path's folder, an output's extension) could pass a word bash runs as one.
+await test("permission hook asks when a command has whitespace bash does not split words at", async () => {
+  const evaluate = await permissionHook();
+  const shell = (command: string) => {
+    const input = { sessionID: "ses_1", action: "shell", resources: [command], effect: "allow" };
+    evaluate(input);
+    return input.effect;
+  };
+  for (const space of ["\v", "\f", "\u00a0", "\u2003", "\u3000", "\ufeff"])
+    assert.equal(shell(`cat README.md${space}notes.txt`), "ask", JSON.stringify(space));
+  assert.equal(shell("cat README.md\tnotes.txt"), "allow");
+  assert.equal(shell("cat README.md notes.txt"), "allow");
+});
+
 // Request shapes recorded from real OpenCode 2.0.15: external_directory sends "<dir>/*" before the
 // tool's own request, and glob and grep send their pattern as the resource and the folder as metadata.
 await test("permission hook refuses built-in reads of the server's /proc and /data without asking", async () => {

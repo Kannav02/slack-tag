@@ -261,6 +261,10 @@ Enabled `GIT_ALLOW_PULL_REQUESTS=1` for research. GitHub revealed the repository
 
 Final checks: both containers use image `975231ad7ee3`, `runsc` and read-only roots; bridge runs as `slack-tag` with zero automatic restarts, and firewall is active. Both key proxies logged successful model requests. Stopped the disposable localhost screenshot server. Removed `/etc/sudoers.d/99-slack-tag-deploy`, validated sudoers, invalidated cached sudo authentication and confirmed passwordless sudo denied from a fresh SSH connection while both services remained active.
 
+## Shell words split only where bash splits them (2026-10-20)
+
+Found while adding the DOC-1 pandoc rule: real OpenCode 2.0.15 sends a command with a vertical tab in it as one resource with the tab inside, and the plugin split words at any whitespace while bash splits only at spaces and tabs. A rule that checks single words could then pass a word bash runs as one: with DOC-1's first draft, `pandoc out.docx -o out<VT>x.pdf` looked like an output `out` and an input `x.pdf`, was allowed, and pandoc tried to build a PDF. No rule on main was found exploitable this way, since splitting more only ever adds words to check. Whitespace other than spaces, tabs and newlines (a vertical tab, form feed or no-break space) now makes any command ask; `tests/policy.integration.test.ts` covers it.
+
 ## OpenCode 2.2.7 upgrade (2026-11-18)
 
 Moved the CLI, client and plugin from 2.0.15 to 2.2.7 together (2.3.2 was released the same day and skipped). On macOS with Node 24.21.0, `npm run check` passed 26 of 28 tests; the two failures (`agents.integration` AGENTS.md injection and `policy.integration` `/proc` and `/data` reads) also fail on `main` with 2.0.15 on macOS, so they are platform-specific, not from the upgrade. `demo/queue-check.mjs` passed against real OpenCode 2.2.7 with the safety plugin and the scripted model after it was updated for the commented JSONC config, `passwordEnv`, a state folder outside the project, and the approval that appending to a file now needs. Not yet run in the Docker image, under gVisor or with real Slack.
