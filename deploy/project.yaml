@@ -5,7 +5,7 @@
 services:
   # This project's own copy of the key proxy, so registered projects never share a network.
   key-proxy:
-    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.0.15}
+    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.2.7}
     pull_policy: never
     restart: unless-stopped
     user: "1000:1000"
@@ -21,7 +21,7 @@ services:
 
   # Runs under gVisor. Set SLACK_TAG_RUNTIME=runc only where gVisor cannot be installed.
   opencode:
-    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.0.15}
+    image: ${SLACK_TAG_IMAGE:-slack-tag-opencode:2.2.7}
     pull_policy: never
     runtime: ${SLACK_TAG_RUNTIME:-runsc}
     restart: unless-stopped
