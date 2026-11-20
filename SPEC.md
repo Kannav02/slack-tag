@@ -117,7 +117,7 @@ OpenCode is the first supported backend. A small common agent interface and back
 
 - Text and supported attachments are delivered to the correct session. Attachments use project-scoped storage and must not overwrite arbitrary project or host paths.
 - Supported attachment types depend on the selected backend/model. Unsupported inputs receive a clear user-visible response.
-- Agent text responses stream back to the originating thread. The agent can post a file it can read (images, logs and other text, up to 10 MB) to the thread with the safety plugin's `slack_attach` tool; see `docs/trust-boundaries.md`.
+- Agent text responses stream back to the originating thread. The agent can post a file it can read (images, Word, ODT, EPUB and PDF documents, logs and other text, up to 10 MB) to the thread with the safety plugin's `slack_attach` tool; see `docs/trust-boundaries.md`.
 - Basic failure reporting is part of the bridge; a separate run-control interface is not.
 
 ## Testing Decisions

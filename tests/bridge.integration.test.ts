@@ -1264,7 +1264,7 @@ await test(
   },
 );
 
-await test("slack_attach files reach the thread redacted; a failed upload only posts a note", async (t) => {
+await test("slack_attach text reaches the thread redacted, documents unchanged; a failed upload only posts a note", async (t) => {
   const h = await harness(t);
   h.send({ ts: "500.1" });
   await h.until(() => h.prompts.length === 1);
@@ -1288,6 +1288,18 @@ await test("slack_attach files reach the thread redacted; a failed upload only p
   assert.deepEqual([done?.channel_id, done?.thread_ts], ["CTEST", "500.1"]);
   assert.equal(done?.initial_comment, "Log for @\u200bchannel [redacted]");
   assert.ok(!JSON.stringify(h.uploads).includes("synthetic-secret"));
+
+  // A document, like an image, cannot be redacted: its bytes reach Slack unchanged, including a NUL,
+  // invalid UTF-8 and a token-like string (the upload length would change if it were decoded as text).
+  const pdf = Buffer.from("%PDF-1.7\n\0\xff\xfe xoxb-in-a-document\n", "latin1");
+  h.attachments[`${sessionID}/a3`] = { name: "Report.PDF", data: pdf.toString("base64") };
+  tool("success", sessionID, { metadata: { slackAttach: "a3" } });
+  const completed = () => h.uploads.filter((u) => u.path === "/api/files.completeUploadExternal");
+  await h.until(() => completed().length === 2);
+  const [, pdfUrl, pdfUpload] = h.uploads.slice(4);
+  assert.ok(pdfUrl && pdfUpload);
+  assert.deepEqual([pdfUrl.filename, pdfUrl.length], ["Report.PDF", String(pdf.length)]);
+  assert.ok(String(pdfUpload.raw).includes(pdf.toString()));
 
   // A subagent's file goes to its parent's thread. Neither Slack refusing the upload nor an
   // expired attachment stops the run: each posts a note.

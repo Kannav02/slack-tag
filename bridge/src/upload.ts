@@ -5,8 +5,9 @@ import type { SlackApi } from "./turn.ts";
 export type OutgoingFile = { name: string; data: Buffer; caption?: string };
 export type ToolSuccess = Extract<AgentEvent, { type: "session.tool.success" }>;
 
-// Uploads a file to a Slack thread; SlackApi.upload redacts text files and the caption. A failure is
-// logged and noted in the thread, never thrown, so the run carries on. Returns whether it was posted.
+// Uploads a file to a Slack thread; SlackApi.upload redacts the caption and text files, not images or
+// documents. A failure is logged and noted in the thread, never thrown, so the run carries on. Returns
+// whether it was posted.
 export async function sendFile(
   slack: SlackApi,
   channelId: string,
