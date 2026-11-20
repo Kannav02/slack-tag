@@ -4,7 +4,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates curl pandoc poppler-utils \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g @opencode/cli@2.0.15
+  && npm install -g @opencode/cli@2.2.7
 
 # Headless Chromium 141.0.7390.37 (build 1194) for `playwright screenshot` of local pages (plugin/src/policy.ts).
 # Root-owned on the read-only root: agent shells (uid 1001) can run it but not change it.

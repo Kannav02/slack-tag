@@ -3,7 +3,16 @@
   "autoupdate": false,
   "plugins": ["../plugin"],
   // Model requests go through the key-proxy service, which holds the real Go key.
-  "providers": { "opencode-go": { "settings": { "baseURL": "http://key-proxy:8080/v1" } } },
+  "providers": {
+    "opencode-go": {
+      "settings": { "baseURL": "http://key-proxy:8080/v1" },
+      // Catalog model URLs override provider settings; pin the deployed models to the proxy too.
+      "models": {
+        "claude-haiku-5-5": { "settings": { "baseURL": "http://key-proxy:8080/v1" } },
+        "kimi-k2.7-code": { "settings": { "baseURL": "http://key-proxy:8080/v1" } }
+      }
+    }
+  },
   // Without the safety plugin, anything beyond reading asks the owner.
   "permissions": [
     { "action": "read", "resource": "*", "effect": "allow" },

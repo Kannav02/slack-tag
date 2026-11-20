@@ -114,9 +114,13 @@ Check out the previous commit in `/opt/slack-tag` and run the update steps. To s
 
 Gives each new Slack thread its own Git worktree on a `jeff/<slug>` branch so threads run concurrently (see [project mapping](project-mapping.md)). Enable it per project; the behaviour and the isolation hold only with all three steps.
 
-1. Mount a writable volume for worktrees on the project's OpenCode service at `/worktrees` (e.g. add a `worktrees-data:/worktrees` volume to its `compose.yaml`/`project.yaml` service and declare it; it must not be `read_only`). `start-server` makes it group-1000-writable with the setgid bit so agent shells can edit worktree files. Worktrees live here, outside the `/project` bind mount.
+1. Mount a writable volume for worktrees on the project's OpenCode service at `/worktrees` (e.g. add a `worktrees-data:/worktrees` volume to its `compose.yaml`/`project.yaml` service and declare it; it must not be `read_only`). Add `CHOWN` and `FOWNER` to that service's startup capabilities alongside `SETUID` and `SETGID`: `start-server` changes the volume owner and mode before dropping to the server user with only SETUID/SETGID. It makes the volume group-1000-writable with setgid so agent shells can edit worktree files. Worktrees live outside `/project`; the project must already have a Git commit.
 2. Set `OPENCODE_CONFIG_PROJECT_DISABLE=1` and `SLACK_TAG_WORKTREE_DIR=/worktrees` in that server's environment. `OPENCODE_CONFIG_PROJECT_DISABLE` stops OpenCode loading agent-controlled config or plugins from a worktree checkout (required for safety; it also turns off AGENTS.md auto-loading on that server). The server's git hardening (`core.fsmonitor=false`, `core.hooksPath=/dev/null`) is applied by `start-server` and needs no configuration.
 3. Add `"worktrees": true` to the channel in `config.json` and restart the bridge. If the server lacks step 2 the plugin refuses and threads fall back to `/project`, so apply 1–2 before 3.
+
+Production research uses `/etc/slack-tag/alpha-worktrees.yaml`; include it after `deploy/git-proxy-alpha.yaml` on every fixed-project Compose update. Dogfooding has no initial commit and remains on the shared checkout. The registered launcher hardcodes `project.yaml`, so `COMPOSE_FILE` in its systemd environment does not add an override.
+
+Project preparation runs as uid 1000 and can fail on files created by agent uid 1001. Stop the project before repairing ownership; only normalize uid-1001 regular files/directories within the project, without following symlinks, then rerun preparation as uid 1000. Do not run the preparation script as root against agent-controlled paths.
 
 ## Private GitHub repositories (opt-in)
 
