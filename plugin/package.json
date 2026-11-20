@@ -7,6 +7,6 @@
     "./rpc": "./src/rpc.ts"
   },
   "dependencies": {
-    "@opencode/plugin": "2.0.15"
+    "@opencode/plugin": "2.2.7"
   }
 }

@@ -13,7 +13,7 @@ bash scripts/setup-cloud.sh
 npm run check
 ```
 
-Setup installs root development tools and the separately locked `bridge/` and `plugin/` packages. OpenCode client/plugin versions remain pinned to 2.0.15; the bridge uses Slack Bolt 4.4.0. No Bun runtime is required for the application or these checks.
+Setup installs root development tools and the separately locked `bridge/` and `plugin/` packages. OpenCode client/plugin versions remain pinned to 2.2.7; the bridge uses Slack Bolt 4.4.0. No Bun runtime is required for the application or these checks.
 
 The checks verify dependencies, typecheck the application, and run integration tests through the actual bridge entrypoint. Tests use temporary SQLite/project files and simulated Slack/OpenCode servers on localhost, with no credentials, Docker, or production access. They do not prove real Slack rendering or real OpenCode execution; see [Cloud development](docs/cloud-development.md).
 

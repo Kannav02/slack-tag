@@ -37,6 +37,8 @@ Do not repoint an existing channel at a different server or replace its data vol
 
 ### Current production mapping (2026-10-14)
 
+Updated 2026-10-18: research's canonical GitHub repository is `maraja/MAS` (the VPS folder and channel identity remain unchanged). Research now enables per-thread worktrees and PR creation. Dogfooding has no initial Git commit or remote, so its worktrees and PR creation remain disabled. Fixed-project Compose updates must include `/etc/slack-tag/alpha-worktrees.yaml` after the Git-proxy override.
+
 | Slack channel | Channel ID | VPS project | Server | Default model |
 | --- | --- | --- | --- | --- |
 | Private `research` | `C0C979QND8S` | `/home/devuser/projects/gem-research-suite` | `127.0.0.1:4101` (`deploy-alpha-1`) | `opencode-go/claude-haiku-5-5` |
@@ -75,7 +77,7 @@ Use this for projects outside the registration folder, or when changing the orig
 
 ## Adding a project from Slack
 
-Requires an `onboarding` section in `config.json` (see `config/example.json`): `projectsRoot` is the only folder whose direct subfolders can be registered, `model` is used for new projects, and `firstPort` (default 4102) is the lowest host port to allocate. Without it, `register` replies that registration is not configured. The `slack-tag-opencode:2.0.15` image must already be built by `deploy/compose.yaml`.
+Requires an `onboarding` section in `config.json` (see `config/example.json`): `projectsRoot` is the only folder whose direct subfolders can be registered, `model` is used for new projects, and `firstPort` (default 4102) is the lowest host port to allocate. Without it, `register` replies that registration is not configured. The `slack-tag-opencode:2.2.7` image must already be built by `deploy/compose.yaml`.
 
 1. Put the project folder in `projectsRoot` on the VPS (`/srv/slack-tag/projects`, owned by uid 1000; see [deployment](deploy.md)), create a Slack channel and invite OpenCode.
 2. As the owner, post `@OpenCode register` in the channel. The bot lists the subfolders that no channel uses yet; symlinks and other entries are skipped.

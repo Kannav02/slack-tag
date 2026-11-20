@@ -52,4 +52,4 @@ See [plugins documentation](https://learn.chatgpt.com/docs/plugins) and [Cloud c
 
 ## Feature handoff prompt
 
-> Work on the named item in docs/backlog.md. Read AGENTS.md, SPEC.md and docs/positioning.md first. Confirm existing behavior before editing. Keep OpenCode 2.0.15 pinned. Use integration tests through the public entrypoint and run npm run check. Report any live Slack, real OpenCode or container checks still needed. Do not deploy to production as part of this task.
+> Work on the named item in docs/backlog.md. Read AGENTS.md, SPEC.md and docs/positioning.md first. Confirm existing behavior before editing. Keep OpenCode 2.2.7 pinned. Use integration tests through the public entrypoint and run npm run check. Report any live Slack, real OpenCode or container checks still needed. Do not deploy to production as part of this task.

@@ -1,4 +1,4 @@
-// Checks the per-project queue against real OpenCode 2.0.15 and the safety plugin, with a scripted
+// Checks the per-project queue against real OpenCode 2.2.7 and the safety plugin, with a scripted
 // model (spike/v2/mock-model.mjs) and the fake Slack. Thread A runs a slow shell command, thread B a
 // fast one sent right after; with the queue, B waits and notes.txt ends up "A" then "B".
 // Usage: node demo/queue-check.mjs   (KEEP_OPEN=1 leaves everything running to inspect http://127.0.0.1:3000)
@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url"
 const root = fileURLToPath(new URL("../", import.meta.url))
 const work = mkdtempSync(join(tmpdir(), "slack-tag-queue-"))
 const project = join(work, "project")
+const stateConfig = join(work, "state", "config.json")
 const password = `queue-${process.pid}`
 const slackUrl = "http://127.0.0.1:3000"
 const opencodeUrl = "http://127.0.0.1:4096"
@@ -36,27 +37,30 @@ async function until(what, check, ms = 60_000) {
 }
 
 mkdirSync(project, { recursive: true })
+mkdirSync(join(work, "state"))
 execFileSync("git", ["init", "-q"], { cwd: project })
 mkdirSync(join(work, "xdg/opencode"), { recursive: true })
 symlinkSync(join(root, "plugin"), join(work, "xdg/plugin"))
-const config = JSON.parse(readFileSync(join(root, "deploy/opencode.global.jsonc"), "utf8"))
-config.providers = JSON.parse(readFileSync(join(root, "spike/v2/opencode.global.jsonc"), "utf8")).providers
+// The configs are JSONC; their comments are whole lines, so dropping those lines leaves JSON.
+const readJsonc = (path) => JSON.parse(readFileSync(path, "utf8").replace(/^\s*\/\/.*$/gm, ""))
+const config = readJsonc(join(root, "deploy/opencode.global.jsonc"))
+config.providers = readJsonc(join(root, "spike/v2/opencode.global.jsonc")).providers
 writeFileSync(join(work, "xdg/opencode/opencode.jsonc"), JSON.stringify(config))
-writeFileSync(join(work, "config.json"), JSON.stringify({
+writeFileSync(stateConfig, JSON.stringify({
   ownerUserId: "UOWNER",
-  channels: { CDEMO: { name: "demo", projectDir: project, opencodeUrl, model: "mock/mock" } },
+  channels: { CDEMO: { name: "demo", projectDir: project, opencodeUrl, passwordEnv: "OPENCODE_SERVER_PASSWORD", model: "mock/mock" } },
 }))
 
 const xdg = { HOME: join(work, "home"), XDG_CONFIG_HOME: join(work, "xdg"), XDG_DATA_HOME: join(work, "home/share"), XDG_STATE_HOME: join(work, "home/state"), XDG_CACHE_HOME: join(work, "home/cache") }
 start("model", process.execPath, [join(root, "spike/v2/mock-model.mjs")])
-start("opencode", "npx", ["--yes", "-p", "@opencode/cli@2.0.15", "opencode", "serve", "--hostname", "127.0.0.1", "--port", "4096"],
+start("opencode", "npx", ["--yes", "-p", "@opencode/cli@2.2.7", "opencode", "serve", "--hostname", "127.0.0.1", "--port", "4096"],
   { cwd: project, env: { ...process.env, ...xdg, OPENCODE_SERVER_PASSWORD: password } })
 const auth = { authorization: "Basic " + Buffer.from(`opencode:${password}`).toString("base64") }
 await until("OpenCode", () => fetch(`${opencodeUrl}/api/model`, { headers: auth }).then((r) => r.ok), 180_000)
 start("slack", process.execPath, [join(root, "demo/fake-slack.mjs")], { env: { ...process.env, DEMO_PROJECT: project } })
 start("bridge", process.execPath, ["--experimental-strip-types", "--experimental-sqlite", "--no-warnings", "src/main.ts"], {
   cwd: join(root, "bridge"),
-  env: { ...process.env, SLACK_API_URL: `${slackUrl}/api/`, SLACK_BOT_TOKEN: "xoxb-demo", SLACK_APP_TOKEN: "xapp-demo", SLACK_TAG_CONFIG: join(work, "config.json"), OPENCODE_SERVER_PASSWORD: password },
+  env: { ...process.env, SLACK_API_URL: `${slackUrl}/api/`, SLACK_BOT_TOKEN: "xoxb-demo", SLACK_APP_TOKEN: "xapp-demo", SLACK_TAG_CONFIG: stateConfig, OPENCODE_SERVER_PASSWORD: password },
 })
 const state = () => fetch(`${slackUrl}/ui/state`).then((r) => r.json())
 await until("bridge connection", async () => (await state()).connected)
@@ -68,8 +72,15 @@ await post("@OpenCode RUN: sleep 8 && echo A >> notes.txt")
 await delay(1000)
 await post("@OpenCode RUN: echo B >> notes.txt")
 
+// Appending to a file asks the owner, so approve each card as it appears.
+const approved = new Set()
 const done = await until("both replies", async () => {
   const { messages } = await state()
+  for (const m of messages.filter((m) => m.blocks?.some((b) => b.elements?.some((e) => e.action_id === "approve")))) {
+    if (approved.has(m.ts)) continue
+    approved.add(m.ts)
+    await fetch(`${slackUrl}/ui/click`, { method: "POST", body: JSON.stringify({ user: "UOWNER", ts: m.ts, action_id: "approve" }) })
+  }
   const a = thread(messages, "echo A"), b = thread(messages, "echo B")
   const finished = (ts) => replies(messages, ts).some((t) => t.includes("Command finished"))
   return a && b && finished(a) && finished(b) && { a: replies(messages, a), b: replies(messages, b) }
